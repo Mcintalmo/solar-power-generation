@@ -1,6 +1,8 @@
 library(tidyverse)
 library(lubridate)
 
+# TODO: Separate data into 3 relational databases, only combine for certain contexts 
+
 data_path <- "./data/"
 
 parse_generation_data <- function(file_name, date_format = "ymd HM") {
@@ -42,13 +44,53 @@ parse_weather_data <- function(file_name) {
            irradiation)
 }
 
-generation <- bind_rows(parse_generation_data("Plant_1_Generation_Data.csv", 
-                                              "dmy HM"),
-                        parse_generation_data("Plant_2_Generation_Data.csv", 
-                                              "ymd HMS"))
+fill_missing_observations <- function(data) {
+  sources <- data %>%
+    pull(source_key) %>%
+    unique()
+  
+  date_range <- data %>%
+    pull(date_time) %>%
+    range()
+  
+  date_times <- seq(from = date_range[1], to = date_range[2], by='15 mins') # lubridate
+  
+  plant_id <- data %>%
+    pull(plant_id) %>%
+    unique()
+  
+  expand_grid(date_times, sources) %>%
+    rename(date_time = date_times, source_key = sources) %>%
+    add_column(plant_id = plant_id, .after = "date_time") %>%
+    full_join(data, by = c("date_time", "plant_id", "source_key"))
+}
+
+date_times_and_sources <-
+  
+
+plant_1_generation <- 
+  parse_generation_data("Plant_1_Generation_Data.csv", "dmy HM") %>%
+  fill_missing_observations()
 
 
-weather <- bind_rows(parse_weather_data("Plant_1_Weather_Sensor_Data.csv"),
-                     parse_weather_data("Plant_2_Weather_Sensor_Data.csv"))
+plant_2_generation <- 
+  parse_generation_data("Plant_2_Generation_Data.csv", "ymd HMS") %>%
+  fill_missing_observations()
 
-rm(data_path, parse_generation_data, parse_weather_data)
+
+generation <- plant_1_generation %>%
+  bind_rows(plant_2_generation)
+
+
+plant_1_weather <- parse_weather_data("Plant_1_Weather_Sensor_Data.csv") %>%
+  fill_missing_observations()
+
+plant_2_weather <- parse_weather_data("Plant_2_Weather_Sensor_Data.csv") %>%
+  fill_missing_observations()
+
+weather <- plant_1_weather %>%
+  bind_rows(plant_2_weather)
+
+rm(data_path, plant_1_generation, plant_2_generation, plant_1_weather, 
+   plant_2_weather,parse_generation_data, parse_weather_data, 
+   fill_missing_observations)
