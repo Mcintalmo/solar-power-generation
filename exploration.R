@@ -5,9 +5,15 @@ library(scales)
 library(broom)
 
 # TODO: Figure out what to do with plant 4136001 (multiply by 10?)
-# TODO: Check Correlation between weather sensor data and output
 # TODO: Create validation set (last three days of the month)
 # TODO: Create train and test set
+
+
+###QUESTIONS TO POSSIBLE ASK:
+# *** Can we predict the power generation for next couple of days? - this allows for better grid management
+# Can we identify the need for panel cleaning/maintenance?
+# Can we identify faulty or suboptimally performing equipment?
+  
 
 ################################################################################
 # EXTRACT, TRANSFORM, LOAD
@@ -107,7 +113,10 @@ solar <- generation %>%
                                "generation_source" = "source_key")) %>%
   full_join(weather, by = c("date_time", "plant_id")) %>%
   rename(weather_source = source_key)
-  
+
+plant_ids <- generation %>%
+  distinct(plant_id) %>%
+  pull(plant_id)
 
 head(generation)
 dim(generation) # 136476      7
@@ -122,8 +131,7 @@ object.size(weather)
 object.size(solar)
 
 
-rm(generation_sources, weather_sources, date_time, parse_generation_data, 
-   parse_weather_data)
+rm(parse_generation_data, parse_weather_data)
 
 
 
@@ -210,69 +218,106 @@ solar %>%
 
 # DC Power
 generation %>% 
-  pull(dc_power) %>% 
-  summary()
+  group_by(plant_id) %>%
+  summarize(min = min(dc_power),
+            max = max(dc_power),
+            median = median(dc_power),
+            mean = mean(dc_power))
 
 generation %>%
-  ggplot(aes(x = dc_power))+
+  ggplot(aes(x = dc_power, fill = plant_id))+
+  geom_histogram()
+
+
+# There is clearly something off about the DC power production, especially 
+#  considering the AC power output. It is incredibly unlikely that MORE AC power
+#  is being produced than DC going into converters. This is likely an input error,
+#  and will be treated as such for furhter analysis.
+generation <- generation %>%
+  mutate(dc_power = ifelse(plant_id == "4136001", dc_power * 10, dc_power))
+
+solar <- solar %>%
+  mutate(dc_power = ifelse(plant_id == "4136001", dc_power * 10, dc_power))
+
+generation %>% 
+  group_by(plant_id) %>%
+  summarize(min = min(dc_power),
+            max = max(dc_power),
+            median = median(dc_power),
+            mean = mean(dc_power))
+
+generation %>%
+  ggplot(aes(x = dc_power, fill = plant_id))+
   geom_histogram()
 
 generation %>%
   filter(dc_power > 0.0) %>%
-  ggplot(aes(x = dc_power))+
+  ggplot(aes(x = dc_power, fill = plant_id)) +
   geom_histogram()
 
 generation %>%
+  group_by(plant_id) %>%
   summarize(no_dc_rate = mean(dc_power == 0)) # 0.495
 
 
 # AC Power
-generation %>% 
-  pull(ac_power) %>% 
-  summary()
+generation %>%
+  group_by(plant_id) %>%
+  summarize(min = min(ac_power),
+            max = max(ac_power),
+            median = median(ac_power),
+            mean = mean(ac_power))
 
 generation %>%
-  ggplot(aes(x = ac_power))+
+  ggplot(aes(x = ac_power, fill = plant_id)) +
   geom_histogram()
 
 generation %>%
   filter(ac_power > 0.0) %>%
-  ggplot(aes(x = ac_power))+
+  ggplot(aes(x = ac_power, fill = plant_id))+
   geom_histogram()
 
 generation %>%
+  group_by(plant_id) %>%
   summarize(no_ac_rate = mean(ac_power == 0)) # 0.495
 
 
 # Daily Yield
 generation %>% 
-  pull(daily_yield) %>% 
-  summary()
+  group_by(plant_id) %>%
+  summarize(min = min(daily_yield),
+            max = max(daily_yield),
+            median = median(daily_yield),
+            mean = mean(daily_yield))
 
 generation %>%
-  ggplot(aes(x = daily_yield))+
+  ggplot(aes(x = daily_yield, fill = plant_id)) +
   geom_histogram()
 
 generation %>%
   filter(daily_yield > 0.0) %>%
-  ggplot(aes(x = daily_yield))+
+  ggplot(aes(x = daily_yield, fill = plant_id)) +
   geom_histogram()
 
 generation %>%
+  group_by(plant_id) %>%
   summarize(no_daily_yield_rate = mean(daily_yield == 0)) # 0.222
 
 # Total Yield
 generation %>% 
-  pull(total_yield) %>% 
-  summary()
+  group_by(plant_id) %>%
+  summarize(min = min(total_yield),
+            max = max(total_yield),
+            median = median(total_yield),
+            mean = mean(total_yield))
 
 generation %>%
-  ggplot(aes(x = total_yield))+
+  ggplot(aes(x = total_yield, fill = plant_id))+
   geom_histogram()
 
 generation %>%
   filter(total_yield > 0.3) %>%
-  ggplot(aes(x = total_yield))+
+  ggplot(aes(x = total_yield, fill = plant_id))+
   geom_histogram() +
   scale_x_log10()
 
@@ -282,13 +327,11 @@ generation %>%
 ################################################################################
 ################################### Averages ###################################
 ################################################################################
-
-# View entire month average by plant
+# view one day from one source
 generation %>%
-  group_by(date_time, plant_id) %>%
-  summarize(avg_dc_power = mean(dc_power)) %>%
-  group_by(plant_id) %>%
-  ggplot(aes(x = date_time, y = avg_dc_power, color = plant_id)) +
+  filter(source_key == unique(source_key)[1]) %>%
+  filter(date_time < make_date(2020, 05, 16)) %>%
+  ggplot(aes(x = date_time, y = dc_power)) +
   geom_line()
 
 # view all sources for one day
@@ -297,81 +340,108 @@ generation %>%
   group_by(date_time, plant_id) %>%
   summarize(avg_dc_power = mean(dc_power)) %>%
   group_by(plant_id) %>%
-  ggplot(aes(x = date_time, y = avg_dc_power, fill = plant_id)) +
-  geom_area(position = "stack") +
+  ggplot(aes(x = date_time, y = avg_dc_power, color = plant_id)) +
+  geom_line() +
   theme(legend.position = "none")
 
-
-# view one day from one source
+# Note: This graph crashes R when produced as a stacked area
+# View entire month average by plant
 generation %>%
-  filter(source_key == unique(source_key)[1]) %>%
-  filter(date_time < make_date(2020, 05, 16)) %>%
-  ggplot(aes(x = date_time, y = dc_power)) +
-  geom_area()
-
-
+  group_by(date_time, plant_id) %>%
+  summarize(avg_dc_power = mean(dc_power)) %>%
+  group_by(plant_id) %>%
+  ggplot(aes(x = date_time, y = avg_dc_power, color = plant_id)) +
+  geom_line()
 ################################################################################
 ######################       Weather Data     ##################################
 ################################################################################
 
 # Ambient Temperature
 weather %>%
-  pull(ambient_temperature) %>%
-  summary()
+  group_by(plant_id) %>%
+  summarize(min = min(ambient_temperature),
+            max = max(ambient_temperature),
+            median = median(ambient_temperature),
+            mean = mean(ambient_temperature))
 
 weather %>%
-  ggplot(aes(x = ambient_temperature)) +
+  ggplot(aes(x = ambient_temperature, fill = plant_id)) +
   geom_histogram(bins = 40)
 
 # Module Temperature
 weather %>%
-  pull(module_temperature) %>%
-  summary()
+  group_by(plant_id) %>%
+  summarize(min = min(module_temperature),
+            max = max(module_temperature),
+            median = median(module_temperature),
+            mean = mean(module_temperature))
 
 weather %>%
-  ggplot(aes(x = module_temperature)) +
+  ggplot(aes(x = module_temperature, fill = plant_id)) +
   geom_histogram(bins = 40)
 
 # Irradiation
 weather %>%
-  pull(irradiation) %>%
-  summary()
+  group_by(plant_id) %>%
+  summarize(min = min(irradiation),
+            max = max(irradiation),
+            median = median(irradiation),
+            mean = mean(irradiation))
 
 weather %>%
-  ggplot(aes(x = irradiation)) +
+  ggplot(aes(x = irradiation, fill = plant_id)) +
   geom_histogram(bins = 40)
 
 weather %>%
   filter(irradiation > 0.00001) %>%
-  ggplot(aes(x = irradiation)) +
+  ggplot(aes(x = irradiation, fill = plant_id)) +
   geom_histogram(bins = 40)
 
 weather %>%
   summarize(no_irradiation_rate = mean(irradiation == 0)) # 0.438
 
 ################################################################################
-################################### Averages ###################################
+################################### Plots ###################################
 ################################################################################
+
+# Daily Irradiation for plant 1
+weather %>%
+  filter(plant_id == plant_ids[1]) %>%
+  mutate(date = round_date(date_time, unit = "day"),
+         time = as_datetime(as_hms(date_time))) %>%
+  ggplot(aes(x = time, y = irradiation, group = date, color = date)) +
+  geom_line(alpha = 0.5)
+
+# Daily Irradiation for plant
+weather %>%
+  filter(plant_id == plant_ids[2]) %>%
+  mutate(date = round_date(date_time, unit = "day"),
+         time = as_datetime(as_hms(date_time))) %>%
+  ggplot(aes(x = time, y = irradiation, group = date, color = date)) +
+  geom_line(alpha = 0.5)
 
 # view entire month from both sources
 weather %>%
   group_by(plant_id) %>%
+  ggplot(aes(x = date_time, y = irradiation, color = plant_id)) +
+  geom_line() +
+  geom_smooth()
+
+weather %>%
+  group_by(plant_id) %>%
   ggplot(aes(x = date_time, y = ambient_temperature, color = plant_id)) +
-  geom_line()
+  geom_line() + 
+  geom_smooth()
 
 weather %>%
   group_by(plant_id) %>%
   ggplot(aes(x = date_time, y = module_temperature, color = plant_id)) +
-  geom_line()
-
-weather %>%
-  group_by(plant_id) %>%
-  ggplot(aes(x = date_time, y = irradiation, color = plant_id)) +
-  geom_line()
+  geom_line() +
+  geom_smooth()
 
 
 ################################################################################
-################################# CORRELATION ##################################
+############################ REGRESSION ANALYSIS ###############################
 ################################################################################
 
 
@@ -380,10 +450,6 @@ weather %>%
 generation %>%
   ggplot(aes(x = dc_power, y = ac_power, color = plant_id)) +
   geom_point(alpha = 0.25)
-
-plant_ids <- generation %>%
-  distinct(plant_id) %>%
-  pull(plant_id)
 
 get_lse <- function(x, y){
   fit <- lm(y ~ x)
@@ -399,29 +465,38 @@ fit <- generation %>%
 plant_1_fit <- generation %>%
   filter(plant_id == plant_ids[1]) %>%
   lm(ac_power ~ dc_power, data = .) %>%
-  tidy()
+  tidy() %>%
+  add_column(plant_id = plant_ids[1], .before = "term")
 
 plant_2_fit <- generation %>%
   filter(plant_id == plant_ids[2]) %>%
   lm(ac_power ~ dc_power, data = .) %>%
-  tidy()
+  tidy() %>%
+  add_column(plant_id = plant_ids[2], .before = "term")
+
+full_fit <- generation %>%
+  lm(ac_power ~ dc_power, data = .) %>%
+  tidy() %>%
+  add_column(plant_id = "both", .before = "term")
+
+plant_1_fit %>%
+  bind_rows(plant_2_fit) %>%
+  bind_rows(full_fit)
 
 generation %>%
   ggplot(aes(x = dc_power, y = ac_power, color = plant_id)) +
   geom_point(alpha = 0.25) +
-  geom_abline(slope = plant_1_fit$estimate[2], 
-              intercept = plant_1_fit$estimate[1],
-              size = 1) +
-  geom_abline(slope = plant_2_fit$estimate[2],
-              intercept = plant_2_fit$estimate[1],
+  geom_abline(slope = full_fit$estimate[2], 
+              intercept = full_fit$estimate[1],
               size = 1) +
   labs(title = "AC Power Produced per DC Power In",
        x = "DC Power",
        y = "AC Power")
 
 
-#### 
+#### IRRADIATION TO TEMPERATURE ####
 
+# Periodicity of ambient_temperature plant 1
 weather %>%
   filter(plant_id == plant_ids[1]) %>%
   mutate(time = as_datetime(as_hms(date_time))) %>%
@@ -429,6 +504,7 @@ weather %>%
   ggplot(aes(x = ambient_temperature, y = module_temperature, color = time)) +
   geom_point()
 
+# Periodicity of ambient_temperature plant 2
 weather %>%
   filter(plant_id == plant_ids[2]) %>%
   mutate(time = as_datetime(as_hms(date_time))) %>%
@@ -436,6 +512,7 @@ weather %>%
   ggplot(aes(x = ambient_temperature, y = module_temperature, color = time)) +
   geom_point()
 
+# Periodicity of module_temperature plant 1
 weather %>%
   filter(plant_id == plant_ids[1]) %>%
   mutate(time = as_datetime(as_hms(date_time))) %>%
@@ -443,6 +520,7 @@ weather %>%
   ggplot(aes(x = irradiation, y = module_temperature, color = time)) +
   geom_point() 
 
+# Periodicity of module_temperature plant 2
 weather %>%
   filter(plant_id == plant_ids[2]) %>%
   mutate(time = as_datetime(as_hms(date_time))) %>%
@@ -450,6 +528,7 @@ weather %>%
   ggplot(aes(x = irradiation, y = module_temperature, color = time)) +
   geom_point() 
 
+# Periodicity of irradiation plant 1
 weather %>%
   filter(plant_id == plant_ids[1]) %>%
   mutate(time = as_datetime(as_hms(date_time))) %>%
@@ -457,6 +536,7 @@ weather %>%
   ggplot(aes(x = irradiation, y = module_temperature, color = time)) +
   geom_point()
 
+# Periodicity of irradiation plant 2
 weather %>%
   filter(plant_id == plant_ids[2]) %>%
   mutate(time = as_datetime(as_hms(date_time))) %>%
@@ -478,34 +558,15 @@ weather %>%
   ggplot(aes(x = irradiation, y = ambient_temperature, color = time)) +
   geom_point()
 
-weather %>%
+plant_1_fit <- weather %>%
   filter(plant_id == plant_ids[1]) %>%
-  mutate(date = round_date(date_time, unit = "day"),
-         time = make_datetime(0, 0, 0, hour(date_time), minute(date_time))) %>%
-  group_by(date) %>%
-  ggplot(aes(x = time, y = ambient_temperature, group = date, color = date)) +
-  geom_line(alpha = 0.5) +
-  scale_x_datetime(labels = date_format("%H:%M")) +
-  labs(title = "Ambient Temperature of Time",
-       x = "Time",
-       y = "Ambient Temperature (Degrees Celsius)") +
-  ylim(c(15, 40)) +
-  theme(legend.position = "none")
-  
+  lm(ambient_temperature ~ irradiation, data = .) %>%
+  tidy() %>%
+  add_column(plant_id = plant_ids[1], .before = "term")
 
 weather %>%
-  filter(plant_id == plant_ids[2]) %>%
-  mutate(date = round_date(date_time, unit = "day"),
-         time = make_datetime(0, 0, 0, hour(date_time), minute(date_time))) %>%
-  group_by(date) %>%
-  ggplot(aes(x = time, y = ambient_temperature, group = date, color = date)) +
-  geom_line(alpha = 0.5) +
-  scale_x_datetime(labels = date_format("%H:%M")) +
-  labs(title = "Ambient Temperature of Time",
-       x = "Time",
-       y = "Ambient Temperature (Degrees Celsius)") +
-  ylim(c(15, 40)) +
-  theme(legend.position = "none")
+  ggplot(aes(x = irradiation, y = ambient_temperature)) +
+  geom_point()
 
   
 
@@ -514,17 +575,92 @@ weather %>%
 ### Additionally, it is shown that ac_power is highly correlated to dc_power, 
 ### but both plants must be considered differently for that.
 
-solar %>%
-  group_by(plant_id) %>%
-  ggplot(aes(irradiation, ac_power, color = plant_id)) +
-  geom_point()
+fit_1 <- solar %>%
+  filter(plant_id == plant_ids[1]) %>%
+  lm(dc_power ~ irradiation, data = .) %>%
+  tidy()
+
+fit_2 <- solar %>%
+  filter(plant_id == plant_ids[2]) %>%
+  lm(dc_power ~ irradiation, data = .) %>%
+  tidy()
+
+fit_both <- solar %>%
+  lm(dc_power ~ irradiation, data = .) %>%
+  tidy()
 
 solar %>%
-  group_by(plant_id) %>%
   ggplot(aes(irradiation, dc_power, color = plant_id)) +
-  geom_point()
+  geom_point(alpha = 0.1) +
+  geom_abline(slope = fit_1$estimate[2], intercept = fit_1$estimate[1], size = 1.5, color = "red") +
+  geom_abline(slope = fit_2$estimate[2], intercept = fit_2$estimate[1], size = 1.5, color = "blue") +
+  geom_abline(slope = fit_both$estimate[2], intercept = fit_both$estimate[1], size = 1.5)
+  
+
+fit_1 <- solar %>%
+  filter((irradiation > 0 & dc_power > 0) & plant_id == plant_ids[1]) %>%
+  lm(dc_power ~ irradiation, data = .) %>%
+  tidy()
+
+fit_2 <- solar %>%
+  filter((irradiation > 0 & dc_power > 0) & plant_id == plant_ids[2]) %>%
+  lm(dc_power ~ irradiation, data = .) %>%
+  tidy()
+
+fit_both <- solar %>%
+  filter(!(irradiation > 0 & dc_power == 0)) %>%
+  lm(dc_power ~ irradiation, data = .) %>%
+  tidy()
 
 solar %>%
+  ggplot(aes(irradiation, dc_power, color = plant_id)) +
+  geom_point(alpha = 0.1) +
+  geom_abline(slope = fit_1$estimate[2], intercept = fit_1$estimate[1], size = 1.5, color = "red") +
+  geom_abline(slope = fit_2$estimate[2], intercept = fit_2$estimate[1], size = 1.5, color = "blue") +
+  geom_abline(slope = fit_both$estimate[2], intercept = fit_both$estimate[1], size = 1.5)
+
+
+
+solar %>%
+  mutate(dc_power_resid = dc_power - irradiation * fit_both$estimate[2] - fit_both$estimate[1]) %>%
+  mutate(dc_power_resid = ifelse(dc_power == 0, 0, dc_power_resid)) %>%
   group_by(plant_id) %>%
-  ggplot(aes(module_temperature, dc_power, color = plant_id)) +
-  geom_point(alpha = 0.25)
+  ggplot(aes(module_temperature, dc_power_resid, color = plant_id)) +
+  geom_point(alpha = 0.05) +
+  geom_smooth()
+
+# Suggests an optimal operating temperature between 20 and 54 degrees.
+# Module temperature best represented by parabola
+fit <- solar %>%
+  filter(!(irradiation > 0 & dc_power == 0)) %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  lm(dc_power ~ irradiation + module_temperature + module_temperature_sq, data = .) %>%
+  tidy()
+
+solar %>%
+  mutate(dc_power_resid = dc_power 
+         - fit$estimate[1] 
+         - irradiation * fit$estimate[2] 
+         - module_temperature * fit$estimate[3]
+         - module_temperature ^ 2 * fit$estimate[4]) %>%
+  mutate(dc_power_resid = ifelse(dc_power == 0, 0, dc_power_resid)) %>%
+  ggplot(aes(ambient_temperature, dc_power_resid, color = plant_id)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth()
+
+fit <- solar %>%
+  filter(!(irradiation > 0 & dc_power == 0)) %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  lm(dc_power ~ irradiation + module_temperature + module_temperature_sq, data = .)
+
+solar %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  mutate(pred = predict(fit, newdata = .)) %>%
+  mutate(pred = ifelse(pred < 0 | irradiation == 0, 0, pred)) %>%
+  ggplot(aes(x = date_time)) +
+  geom_line(aes(y = pred))
+
+
+################################################################################
+# Predictions and RMSE
+################################################################################
