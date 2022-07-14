@@ -1,10 +1,9 @@
 library(tidyverse)
 library(lubridate)
 library(hms)
-library(scales)
 library(broom)
+library(caret)
 
-# TODO: Figure out what to do with plant 4136001 (multiply by 10?)
 # TODO: Create validation set (last three days of the month)
 # TODO: Create train and test set
 
@@ -100,8 +99,44 @@ weather <- parse_weather_data("Plant_1_Weather_Sensor_Data.csv") %>%
   bind_rows(parse_weather_data("Plant_2_Weather_Sensor_Data.csv"))
 
 
+# Before we combine the data, let's do a quick sanity check. Full disclosure,
+#  I discovered this quirk much later in analysis. I moved it here to to
+#  reduce lines of code and make future graphs more intuitive.
+
+# Let's take a quick look at the stats for generation
+generation %>% 
+  group_by(plant_id) %>%
+  summarize(min = min(dc_power),
+            max = max(dc_power),
+            median = median(dc_power),
+            mean = mean(dc_power))
+
+# Hmm. The max and median are off by almost a factor of 10.
+generation %>%
+  ggplot(aes(x = dc_power, fill = plant_id))+
+  geom_histogram()
+
+# Waoh, something is definitely off. Let us assume that there was a conversion
+#  error. Considering that the date formats were different accross files, it is
+#  not unlikely that units were recorded differently. To confirm, let's look at
+#  the ac power output based on dc power generated. We expect a line
+#  approximately on the unity, with slight loss.
+
+generation %>%
+  ggplot(aes(x = dc_power, y = ac_power, color = plant_id)) +
+  geom_point()
+
+# This suggests that somehow the power output is 10 times the input. As this is
+#  impossible, we will assume the dc power is off by a factor of 10.
+
+generation <- generation %>%
+  mutate(dc_power = ifelse(plant_id == "4136001", dc_power * 10, dc_power))
+
+
 # Contains a large number of NA rows,
-#  and it is sometimes not useful to include them, or have a lot of 
+#  and it is sometimes not useful to include them. Thus, we will maintain the
+#  generation and weather set when concerned about that information and 
+#  consider the solar data when looking at relationships.
 #  na.remove = TRUE
 solar <- generation %>%
   group_by(plant_id) %>%
@@ -126,10 +161,28 @@ head(solar)
 dim(solar) # 143616     11
 # Discrepency in row counts has to do with missing rows from generation data
 
+
+################################################################################
+######################### SEPARATE VALIDATION ##################################
+################################################################################
+# Let's determine the validation set. We have data for 34 days. Let's take about
+#  10% of the data, and treat the last 4 days as validation.
+validation <- generation %>%
+  filter(date_time >= make_date(2020, 06, 15))
+
+solar <- solar %>%
+  anti_join(validation)
+
+generation <- generation %>%
+  anti_join(validation)
+
+weather <- weather %>%
+  anti_join(validation)
+
 object.size(generation)
 object.size(weather)
 object.size(solar)
-
+object.size(validation)
 
 rm(parse_generation_data, parse_weather_data)
 
@@ -217,28 +270,6 @@ solar %>%
 ################################################################################
 
 # DC Power
-generation %>% 
-  group_by(plant_id) %>%
-  summarize(min = min(dc_power),
-            max = max(dc_power),
-            median = median(dc_power),
-            mean = mean(dc_power))
-
-generation %>%
-  ggplot(aes(x = dc_power, fill = plant_id))+
-  geom_histogram()
-
-
-# There is clearly something off about the DC power production, especially 
-#  considering the AC power output. It is incredibly unlikely that MORE AC power
-#  is being produced than DC going into converters. This is likely an input error,
-#  and will be treated as such for furhter analysis.
-generation <- generation %>%
-  mutate(dc_power = ifelse(plant_id == "4136001", dc_power * 10, dc_power))
-
-solar <- solar %>%
-  mutate(dc_power = ifelse(plant_id == "4136001", dc_power * 10, dc_power))
-
 generation %>% 
   group_by(plant_id) %>%
   summarize(min = min(dc_power),
@@ -570,40 +601,68 @@ weather %>%
 
   
 
-### FROM THIS: I am going to conclude that temperature is highly, highly correlated
-### to irradition and time. Thus, it will not be included with original predictions
-### Additionally, it is shown that ac_power is highly correlated to dc_power, 
-### but both plants must be considered differently for that.
+### FROM THIS: I am going to conclude that temperature is highly  correlated
+### to irradiation and time.
+### AC is directly correlated to DC. 
+# Let's start building our model based on: 
+# 1) irradiation
+# 2) module temperature
+# 3) ambient temperature
+# 4) time
 
-fit_1 <- solar %>%
+RMSE <- function(predicted_power, test_power){
+  sqrt(mean((test_power - predicted_power)^2))
+}
+
+test_index <- solar %>%
+  na.omit() %>%
+  pull(dc_power) %>%
+  createDataPartition(times = 1, p = 0.2, list = FALSE)
+
+train_set <- solar %>% na.omit() %>% slice(- test_index)
+test_set <- solar %>% na.omit() %>% slice(test_index)
+
+########    NAIVE RMSE    ####
+mu_hat <- mean(train_set$dc_power)
+RMSE(mu_hat, test_set$dc_power) # 3948.617
+
+fit_1 <- train_set %>%
   filter(plant_id == plant_ids[1]) %>%
   lm(dc_power ~ irradiation, data = .) %>%
   tidy()
 
-fit_2 <- solar %>%
+fit_2 <- train_set %>%
   filter(plant_id == plant_ids[2]) %>%
   lm(dc_power ~ irradiation, data = .) %>%
   tidy()
 
-fit_both <- solar %>%
+fit_both <- train_set %>%
   lm(dc_power ~ irradiation, data = .) %>%
   tidy()
 
-solar %>%
+train_set %>%
   ggplot(aes(irradiation, dc_power, color = plant_id)) +
   geom_point(alpha = 0.1) +
   geom_abline(slope = fit_1$estimate[2], intercept = fit_1$estimate[1], size = 1.5, color = "red") +
   geom_abline(slope = fit_2$estimate[2], intercept = fit_2$estimate[1], size = 1.5, color = "blue") +
   geom_abline(slope = fit_both$estimate[2], intercept = fit_both$estimate[1], size = 1.5)
   
+predicted_power <- test_set %>%
+  mutate(pred = fit_both$estimate[1] + fit_both$estimate[2] * irradiation) %>%
+  pull(pred)
+
+RMSE(predicted_power, test_set$dc_power)
+length(predicted_power)
+length(test_set$dc_power)
+predicted_power - test_set$dc_power
 
 fit_1 <- solar %>%
-  filter((irradiation > 0 & dc_power > 0) & plant_id == plant_ids[1]) %>%
+  filter(!(irradiation > 0 & dc_power == 0) & plant_id == plant_ids[1]) %>%
   lm(dc_power ~ irradiation, data = .) %>%
   tidy()
 
 fit_2 <- solar %>%
-  filter((irradiation > 0 & dc_power > 0) & plant_id == plant_ids[2]) %>%
+  filter(!(irradiation > 0 & dc_power == 0) & plant_id == plant_ids[2]) %>%
   lm(dc_power ~ irradiation, data = .) %>%
   tidy()
 
