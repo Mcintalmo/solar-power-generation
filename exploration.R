@@ -4,8 +4,7 @@ library(hms)
 library(broom)
 library(caret)
 
-# TODO: Create validation set (last three days of the month)
-# TODO: Create train and test set
+# TODO: Remove dc power = 0 when irradiation > 0
 
 
 ###QUESTIONS TO POSSIBLE ASK:
@@ -220,7 +219,6 @@ solar %>%
   labs(title = "Time Series of Power Inverter Failures",
        x = "Time",
        y = "Number of Failures")
-    
 
 solar %>%
   anti_join(weather) %>%
@@ -230,6 +228,20 @@ solar %>%
   labs(title = "Time Series of Weather Sensor Failures",
        x = "Time",
        y = "Number of Failures")
+
+solar %>%
+  filter((dc_power == 0 & irradiation > 0) | is.na(dc_power)) %>%
+  ggplot(aes(x = date_time, fill = plant_id, color = plant_id)) +
+  geom_bar()
+
+solar %>%
+  group_by(plant_id, generation_source) %>%  
+  filter((dc_power == 0 & irradiation > 0) | is.na(dc_power)) %>%
+  tally() %>%
+  arrange(desc(n)) %>%
+  ggplot(aes(x = reorder(generation_source, -n), y = n, fill = plant_id)) +
+  geom_col() +
+  theme(axis.text.x = element_text(angle = 90))
 
 
 #### SOURCE_KEY ####
@@ -443,7 +455,7 @@ weather %>%
   ggplot(aes(x = time, y = irradiation, group = date, color = date)) +
   geom_line(alpha = 0.5)
 
-# Daily Irradiation for plant
+# Daily Irradiation for plant 2
 weather %>%
   filter(plant_id == plant_ids[2]) %>%
   mutate(date = round_date(date_time, unit = "day"),
@@ -614,29 +626,28 @@ RMSE <- function(predicted_power, test_power){
   sqrt(mean((test_power - predicted_power)^2))
 }
 
+set.seed(1)
 test_index <- solar %>%
+  filter(plant_id == "4135001") %>%
   na.omit() %>%
   pull(dc_power) %>%
   createDataPartition(times = 1, p = 0.2, list = FALSE)
 
-train_set <- solar %>% na.omit() %>% slice(- test_index)
-test_set <- solar %>% na.omit() %>% slice(test_index)
+train_set <- solar %>% 
+  filter(plant_id == "4135001") %>% 
+  na.omit() %>% 
+  slice(- test_index)
+test_set <- solar %>% 
+  filter(plant_id == "4135001") %>%
+  na.omit() %>% 
+  slice(test_index)
 
 ########    NAIVE RMSE    ####
 mu_hat <- mean(train_set$dc_power)
-RMSE(mu_hat, test_set$dc_power) # 3948.617
+naive_rmse <- RMSE(mu_hat, test_set$dc_power) # 4077.328
+results <- tibble(method = "Average", naive_rmse)
 
-fit_1 <- train_set %>%
-  filter(plant_id == plant_ids[1]) %>%
-  lm(dc_power ~ irradiation, data = .) %>%
-  tidy()
-
-fit_2 <- train_set %>%
-  filter(plant_id == plant_ids[2]) %>%
-  lm(dc_power ~ irradiation, data = .) %>%
-  tidy()
-
-fit_both <- train_set %>%
+fit <- train_set %>%
   lm(dc_power ~ irradiation, data = .) %>%
   tidy()
 
@@ -651,36 +662,101 @@ predicted_power <- test_set %>%
   mutate(pred = fit_both$estimate[1] + fit_both$estimate[2] * irradiation) %>%
   pull(pred)
 
-RMSE(predicted_power, test_set$dc_power)
-length(predicted_power)
-length(test_set$dc_power)
-predicted_power - test_set$dc_power
+RMSE(predicted_power, test_set$dc_power) # 1836.379
 
-fit_1 <- solar %>%
-  filter(!(irradiation > 0 & dc_power == 0) & plant_id == plant_ids[1]) %>%
+fit_1 <- train_set %>%
+  filter(irradiation > 0 & dc_power > 0 & plant_id == plant_ids[1]) %>%
   lm(dc_power ~ irradiation, data = .) %>%
   tidy()
 
-fit_2 <- solar %>%
-  filter(!(irradiation > 0 & dc_power == 0) & plant_id == plant_ids[2]) %>%
+fit_2 <- train_set %>%
+  filter(irradiation > 0 & dc_power > 0 & plant_id == plant_ids[2]) %>%
   lm(dc_power ~ irradiation, data = .) %>%
   tidy()
 
-fit_both <- solar %>%
-  filter(!(irradiation > 0 & dc_power == 0)) %>%
+fit_both <- train_set %>%
+  filter(irradiation > 0 & dc_power > 0) %>%
   lm(dc_power ~ irradiation, data = .) %>%
   tidy()
 
-solar %>%
+train_set %>%
   ggplot(aes(irradiation, dc_power, color = plant_id)) +
   geom_point(alpha = 0.1) +
   geom_abline(slope = fit_1$estimate[2], intercept = fit_1$estimate[1], size = 1.5, color = "red") +
   geom_abline(slope = fit_2$estimate[2], intercept = fit_2$estimate[1], size = 1.5, color = "blue") +
   geom_abline(slope = fit_both$estimate[2], intercept = fit_both$estimate[1], size = 1.5)
 
+predicted_power <- test_set %>%
+  filter(plant_id == plant_ids[1]) %>%
+  mutate(pred = fit_1$estimate[1] + fit_1$estimate[2] * irradiation) %>%
+  mutate(pred = ifelse(irradiation == 0 | pred < 0, 0, pred)) %>%
+  pull(pred)
 
+RMSE(predicted_power, test_set %>% filter(plant_id == plant_ids[1]) %>% pull(dc_power)) # 589.5741
+
+predicted_power <- test_set %>%
+  filter(plant_id == plant_ids[2]) %>%
+  mutate(pred = fit_2$estimate[1] + fit_2$estimate[2] * irradiation) %>%
+  mutate(pred = ifelse(irradiation == 0 | pred < 0, 0, pred)) %>%
+  pull(pred)
+
+RMSE(predicted_power, test_set %>% filter(plant_id == plant_ids[2]) %>% pull(dc_power)) # 2623.118
+
+predicted_power <- test_set %>%
+  mutate(pred = fit_both$estimate[1] + fit_both$estimate[2] * irradiation) %>%
+  mutate(pred = ifelse(irradiation == 0 | pred < 0, 0, pred)) %>%
+  pull(pred)
+
+RMSE(predicted_power, test_set %>% pull(dc_power)) # 1927.581
+
+####### The noise present in plant 2, seemingly as a result of faulty panels, 
+# makes prediction difficult without first developing an outlier detection
+# method. Since the scope of this project encapsulates predictions, we will
+# REMOVE the problem sources. Plant 2 seems to be a problem. Can we be more
+# precise?
 
 solar %>%
+  na.omit() %>%
+  group_by(plant_id, generation_source) %>%
+  summarize(n = sum((dc_power == 0 & irradiation > 0))) %>%
+  ggplot(aes(x = reorder(generation_source, desc(n)), y = n, fill = plant_id)) +
+  geom_col()
+
+solar %>%
+  group_by(plant_id, generation_source) %>%
+  summarize(n = sum(is.na(dc_power) | is.na(irradiation))) %>%
+  ggplot(aes(x = reorder(generation_source, desc(n)), y = n, fill = plant_id)) +
+  geom_col()
+
+solar %>%
+  group_by(plant_id, generation_source) %>%
+  mutate(is_na = is.na(dc_power) | is.na(irradiation)) %>%
+  mutate(likely_na = !is_na & dc_power == 0 & irradiation > 0) %>%
+  summarize(na_rate = mean(is_na), likely_na_rate = mean(likely_na)) %>%
+  ggplot(aes(x = na_rate, y = likely_na_rate, color = plant_id)) +
+  geom_point()
+
+# Meaning most of the likely_na's are probably na's. Not knowing the cause of
+#  the failures and requiring additional analysis to tease out correlations,
+#  we will work only with plant 4135001 moving forward
+train_set <- train_set %>%
+  filter(plant_id == "4135001")
+
+test_set <- test_set %>%
+  filter(plant_id == "4135001")
+
+
+### It looks like the first three are particularly aggregious.
+# high_na_sources <- train_set %>%
+#   group_by(generation_source) %>%
+#   summarize(n_outliers = sum((dc_power == 0 & irradiation > 0) | is.na(dc_power) | is.na(irradiation))) %>%
+#   slice_max(n_outliers, n = 4) %>%
+#   pull(generation_source)
+# 
+# high_na_sources
+  
+
+train_set %>%
   mutate(dc_power_resid = dc_power - irradiation * fit_both$estimate[2] - fit_both$estimate[1]) %>%
   mutate(dc_power_resid = ifelse(dc_power == 0, 0, dc_power_resid)) %>%
   group_by(plant_id) %>%
@@ -690,13 +766,13 @@ solar %>%
 
 # Suggests an optimal operating temperature between 20 and 54 degrees.
 # Module temperature best represented by parabola
-fit <- solar %>%
+fit <- train_set %>%
   filter(!(irradiation > 0 & dc_power == 0)) %>%
   mutate(module_temperature_sq = module_temperature ^ 2) %>%
   lm(dc_power ~ irradiation + module_temperature + module_temperature_sq, data = .) %>%
   tidy()
 
-solar %>%
+train_set %>%
   mutate(dc_power_resid = dc_power 
          - fit$estimate[1] 
          - irradiation * fit$estimate[2] 
@@ -707,17 +783,25 @@ solar %>%
   geom_point(alpha = 0.1) +
   geom_smooth()
 
-fit <- solar %>%
+fit <- train_set %>%
   filter(!(irradiation > 0 & dc_power == 0)) %>%
   mutate(module_temperature_sq = module_temperature ^ 2) %>%
   lm(dc_power ~ irradiation + module_temperature + module_temperature_sq, data = .)
 
-solar %>%
+predicted_power <- test_set %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  predict(fit, .)
+RMSE(predicted_power, test_set$dc_power) # 568.5238
+
+train_set %>%
   mutate(module_temperature_sq = module_temperature ^ 2) %>%
   mutate(pred = predict(fit, newdata = .)) %>%
   mutate(pred = ifelse(pred < 0 | irradiation == 0, 0, pred)) %>%
   ggplot(aes(x = date_time)) +
   geom_line(aes(y = pred))
+
+test_set %>%
+  mutate(pred = predict(fit, new_data = .))
 
 
 ################################################################################

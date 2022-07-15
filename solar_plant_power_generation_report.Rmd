@@ -1,0 +1,87 @@
+---
+title: "solar-plant-power-generation"
+author: "Alex McIntosh"
+date: "7/15/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, # Default to false considering I hope to use mostly graphs
+  message = FALSE,
+  warning = FALSE,
+  tidy = TRUE,
+  cahe = TRUE, # Set to FALSE to conserve memory
+  eval = FALSE # Set to TRUE for code to actually rune
+)
+```
+
+# Introduction
+
+For more information about how the graphs and results were generated for this
+report, see <http://www.github.com/mcintalmo/solar-plant-power-generation> for
+both the R Markdown that generated this report and the notebook that used for
+exploration.
+
+# Methods and Analysis
+
+
+## Data Collection
+The data for this analysis was collected by two solar plants in India.
+
+The first plant, id: 4135001 is near Gandikotta, Andhra and the second plant,
+id: 4136001 is near Nasik, Maharashtra.
+
+Because of the color schemes of the graphs to follow, for the remainder of the 
+report I will refer to the Gandikotta plant (4135001) as "Blue Plant" and plant
+in Nasik (4136001) as "Red Plant."
+
+The data were collected at 15 minute intervals for 34 days.
+
+22 inverter sensors and one weather sensor at each plant brought the total to 46
+senesors. 
+
+
+The inverter sensors collected the DC and AC output of the group of solar panels
+it was monitoring.
+
+Additionally, the inverters tallied the daily yield in DC output from
+midnight to midnight and maintained total yield the sensor had observed.
+
+Total yield increased until a sensor was replaced, at which point it would begin
+again at 0.
+
+
+The weather sensors recorded the ambient temperature, the temperature of the
+modulte, and the irradiation level.
+
+Owing to the sensors' reading of 0 at night, it is assumed any irradiation is
+owed to the sun's radiation.
+
+
+THe data were 
+
+## Data Cleaning
+
+
+
+## Data Exploration
+```{r pressure}
+plot(pressure)
+```
+
+
+## Correlation
+
+
+# Results
+
+
+## Model Root Mean Squared Errors
+
+
+## Validation
+
+
+# Conclusion
+
