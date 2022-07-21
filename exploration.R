@@ -4,8 +4,6 @@ library(hms)
 library(broom)
 library(caret)
 
-# TODO: Remove dc power = 0 when irradiation > 0
-
 
 ###QUESTIONS TO POSSIBLE ASK:
 # *** Can we predict the power generation for next couple of days? - this allows for better grid management
@@ -98,9 +96,60 @@ weather <- parse_weather_data("Plant_1_Weather_Sensor_Data.csv") %>%
   bind_rows(parse_weather_data("Plant_2_Weather_Sensor_Data.csv"))
 
 
+################################################################################
+######################### SEPARATE VALIDATION ##################################
+################################################################################
+head(generation)
+dim(generation) # 136476    7
+head(weather)
+dim(weather) # 6441    6
+
+# Before we go any further, Let's determine the validation set. 
+range(generation$date_time)
+difftime(max(generation$date_time), min(generation$date_time))
+#We have data for 34 days. Let's take about
+#  10% of the data, and treat the last 4 days as validation.
+
+extract_validation <- function(data, date_time_cutoff = make_date(2020, 06, 14)){
+  data %>%
+    filter(date_time >= date_time_cutoff)
+}
+
+validation_generation <- generation %>%
+  extract_validation()
+
+validation_weather <- weather %>%
+  extract_validation()
+
+generation <- generation %>%
+  anti_join(validation_generation)
+
+weather <- weather %>%
+  anti_join(validation_weather)
+
+nrow(generation) # 119624
+nrow(validation_generation) # 16852
+
+nrow(weather) # 5673
+nrow(validation_weather)
+
+rm(extract_validation) # 768
+
+#### METRIC OF IMPROVEMENT ####
+RMSE <- function(predicted_power, test_power){
+  sqrt(mean((test_power - predicted_power)^2))
+}
+
+################################################################################
+############################ DATA CLEANING #####################################
+################################################################################
 # Before we combine the data, let's do a quick sanity check. Full disclosure,
 #  I discovered this quirk much later in analysis. I moved it here to to
 #  reduce lines of code and make future graphs more intuitive.
+
+plant_ids <- generation %>%
+  distinct(plant_id) %>%
+  pull(plant_id)
 
 # Let's take a quick look at the stats for generation
 generation %>% 
@@ -112,8 +161,12 @@ generation %>%
 
 # Hmm. The max and median are off by almost a factor of 10.
 generation %>%
+  group_by(plant_id) %>%
   ggplot(aes(x = dc_power, fill = plant_id))+
-  geom_histogram()
+  geom_histogram() +
+  labs(title = "DC Power Distribution by Plant",
+       x = "DC Power",
+       y = "Count")
 
 # Waoh, something is definitely off. Let us assume that there was a conversion
 #  error. Considering that the date formats were different accross files, it is
@@ -123,93 +176,65 @@ generation %>%
 
 generation %>%
   ggplot(aes(x = dc_power, y = ac_power, color = plant_id)) +
-  geom_point()
+  geom_point() +
+  geom_abline(size = 1) +
+  labs(title = "DC to AC Power Conversion",
+       x = "DC Power",
+       y = "AC Power",
+       color = "Plant ID")
 
 # This suggests that somehow the power output is 10 times the input. As this is
-#  impossible, we will assume the dc power is off by a factor of 10.
+#  impossible, suggesting input error. As the date formats between the two plants
+#  is different, human error is not impossible.
 
-generation <- generation %>%
-  mutate(dc_power = ifelse(plant_id == "4136001", dc_power * 10, dc_power))
+# A 90% loss rate is incredibly high. Considering a comparable AC power output,
+#  it is far more likely to be a unit conversion problem. To fix is:
 
+generation %>%
+  ggplot(aes(x = dc_power, y = ac_power, color = plant_id)) +
+  geom_point() +
+  geom_abline(size = 1) +
+  labs(title = "DC to AC Power Conversion",
+       x = "DC Power",
+       y = "AC Power",
+       color = "Plant ID")
 
-# Contains a large number of NA rows,
-#  and it is sometimes not useful to include them. Thus, we will maintain the
-#  generation and weather set when concerned about that information and 
-#  consider the solar data when looking at relationships.
-#  na.remove = TRUE
-solar <- generation %>%
-  group_by(plant_id) %>%
-  expand(date_time = full_seq(date_time, as.numeric(minutes(15))), 
-         generation_source = source_key) %>%
-  ungroup() %>%
-  left_join(generation, by = c("date_time", 
-                               "plant_id", 
-                               "generation_source" = "source_key")) %>%
-  full_join(weather, by = c("date_time", "plant_id")) %>%
-  rename(weather_source = source_key)
+# This more closely aligns with expectation.
 
-plant_ids <- generation %>%
-  distinct(plant_id) %>%
-  pull(plant_id)
+# Before moving forward, a quick function will be written to relate the
+#  generation and weather data, as that will be common.
+join_generation_weather <- function(generation_data, weather_data){
+  generation_data %>%
+    group_by(plant_id) %>%
+    expand(date_time = full_seq(date_time, as.numeric(minutes(15))), # include a time stamp for every generation source for every 15 minutes
+           generation_source = source_key) %>% # rename necessary since weather also has a source_key
+    ungroup() %>%
+    left_join(generation_data, by = c("date_time", 
+                                 "plant_id", 
+                                 "generation_source" = "source_key")) %>%
+    mutate(dc_power = ifelse(plant_id == "4135001", dc_power / 10, dc_power)) %>% # Unit conversion error
+    full_join(weather_data, by = c("date_time", "plant_id")) %>%
+    rename(weather_source = source_key)
+}
 
-head(generation)
-dim(generation) # 136476      7
-head(weather)
-dim(weather) # 6441    6
+solar <- join_generation_weather(generation, weather)
 head(solar)
-dim(solar) # 143616     11
+dim(solar) # 126720     11
 # Discrepency in row counts has to do with missing rows from generation data
 
-
-################################################################################
-######################### SEPARATE VALIDATION ##################################
-################################################################################
-# Let's determine the validation set. We have data for 34 days. Let's take about
-#  10% of the data, and treat the last 4 days as validation.
-validation <- generation %>%
-  filter(date_time >= make_date(2020, 06, 15))
-
-solar <- solar %>%
-  anti_join(validation)
-
-generation <- generation %>%
-  anti_join(validation)
-
-weather <- weather %>%
-  anti_join(validation)
-
-object.size(generation)
-object.size(weather)
-object.size(solar)
-object.size(validation)
-
-rm(parse_generation_data, parse_weather_data)
-
-
-
-
-################################################################################
-############################### EXPLORATION ####################################
-################################################################################
-
-#### DATE_TIME ####
-range(solar$date_time) # "2020-05-15 00:00:00 UTC" "2020-06-17 23:45:00 UTC"
-difftime(max(solar$date_time), min(solar$date_time)) # Time difference of 33.98958 days
-n_distinct(solar$date_time) # 3264'
+## The noise present in plant 2, seemingly as a result of faulty panels, 
+# makes prediction difficult without first developing an outlier detection
+# method. Since the scope of this project encapsulates predictions, we will
+# REMOVE the problem sources. Plant 2 seems to be a problem. Can we be more
+# precise?
 
 solar %>%
-  anti_join(generation) %>%
-  distinct(date_time) %>%
-  nrow() # 1010
-
-solar %>%
-  anti_join(weather) %>%
-  distinct(date_time) %>%
-  nrow()# 85
-
-#### PLANT_ID ####
-unique(generation$plant_id) # 4135001 4136001
-unique(weather$plant_id) # 4135001 4136001
+  filter((dc_power == 0 & irradiation > 0) | is.na(dc_power)) %>%
+  ggplot(aes(x = date_time, fill = plant_id, color = plant_id)) +
+  geom_bar() +
+  labs(title = "Sensor Failures and Anomalies Over Time",
+       x = "Time", 
+       y = "Anamoly Count")
 
 solar %>%
   anti_join(generation) %>%
@@ -221,6 +246,8 @@ solar %>%
        y = "Number of Failures")
 
 solar %>%
+  select(date_time, plant_id) %>%
+  unique() %>%
   anti_join(weather) %>%
   ggplot(aes(x = date_time, fill = plant_id, color = plant_id)) +
   geom_bar() +
@@ -229,10 +256,6 @@ solar %>%
        x = "Time",
        y = "Number of Failures")
 
-solar %>%
-  filter((dc_power == 0 & irradiation > 0) | is.na(dc_power)) %>%
-  ggplot(aes(x = date_time, fill = plant_id, color = plant_id)) +
-  geom_bar()
 
 solar %>%
   group_by(plant_id, generation_source) %>%  
@@ -241,7 +264,68 @@ solar %>%
   arrange(desc(n)) %>%
   ggplot(aes(x = reorder(generation_source, -n), y = n, fill = plant_id)) +
   geom_col() +
-  theme(axis.text.x = element_text(angle = 90))
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "Combined Sensor Anamolies and Failures by Source",
+       x = "Generation Sensor Key",
+       y = "Anamoly Count")
+
+solar %>%
+  na.omit() %>%
+  group_by(plant_id, generation_source) %>%
+  summarize(n = sum((dc_power == 0 & irradiation > 0))) %>%
+  ggplot(aes(x = reorder(generation_source, desc(n)), y = n, fill = plant_id)) +
+  geom_col() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "Anomaly Count Per Sensor",
+       x = "Generation Source Key",
+       y = "Count")
+
+solar %>%
+  group_by(plant_id, generation_source) %>%
+  summarize(n = sum(is.na(dc_power) | is.na(irradiation))) %>%
+  ggplot(aes(x = reorder(generation_source, desc(n)), y = n, fill = plant_id)) +
+  geom_col() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "Combined Sensor Anamoly and Failure Count Per Sensor",
+       x = "Generation Source Key",
+       y = "Count")
+
+solar %>%
+  group_by(plant_id, generation_source) %>%
+  mutate(is_na = is.na(dc_power) | is.na(irradiation)) %>%
+  mutate(likely_na = !is_na & dc_power == 0 & irradiation > 0) %>%
+  summarize(na_rate = sum(is_na), likely_na_rate = sum(likely_na)) %>%
+  ggplot(aes(x = na_rate, y = likely_na_rate, color = plant_id)) +
+  geom_point() +
+  labs(title = "Relationship Between Sensor NA and Anamoly",
+       x = "NA Count",
+       y = "Anamoly County")
+
+
+# Meaning most of the anamolies are in fact garbage data. Not knowing the cause of
+#  the failures and requiring additional analysis to tease out correlations,
+#  we will work only with plant 4135001 moving forward
+solar <- solar %>%
+  filter(plant_id == "4135001")
+
+rm(plant_1_generation, plant_1_weather)
+
+nrow(solar) # 63360
+
+object.size(generation)
+object.size(weather)
+object.size(solar)
+object.size(validation_generation)
+object.size(validation_weather)
+
+rm(parse_generation_data, parse_weather_data)
+
+################################################################################
+############################### EXPLORATION ####################################
+################################################################################
+
+#### DATE_TIME ####
+n_distinct(solar$date_time) # 2880
 
 
 #### SOURCE_KEY ####
@@ -263,18 +347,6 @@ plant_2_source_keys <-
 intersect(plant_1_source_keys, plant_2_source_keys) # character(0)
 
 rm(plant_1_source_keys, plant_2_source_keys)
-
-solar %>%
-  anti_join(generation) %>%
-  group_by(plant_id, generation_source) %>%
-  tally() %>%
-  ggplot(aes(x = reorder(generation_source, -n), y = n, fill = plant_id)) +
-  geom_col() +
-  theme(axis.text.x = element_text(angle = 90)) +
-  labs(title = "Inverter Failures",
-       x = "Inverter",
-       y = "Total Number of Failures")
-
 
 
 ################################################################################
@@ -490,9 +562,10 @@ weather %>%
 
 #### AC Power vs DC Power ####
 
-generation %>%
+solar %>%
   ggplot(aes(x = dc_power, y = ac_power, color = plant_id)) +
-  geom_point(alpha = 0.25)
+  geom_point(alpha = 0.25) +
+  geom_abline()
 
 get_lse <- function(x, y){
   fit <- lm(y ~ x)
@@ -501,36 +574,15 @@ get_lse <- function(x, y){
          se = summary(fit)$coefficient[,2])
 }
 
-fit <- generation %>%
-  group_by(plant_id) %>%
-  summarize(get_lse(dc_power, ac_power))
+fit <- solar %>%
+  lm(ac_power ~ dc_power, data = .)
 
-plant_1_fit <- generation %>%
-  filter(plant_id == plant_ids[1]) %>%
-  lm(ac_power ~ dc_power, data = .) %>%
-  tidy() %>%
-  add_column(plant_id = plant_ids[1], .before = "term")
 
-plant_2_fit <- generation %>%
-  filter(plant_id == plant_ids[2]) %>%
-  lm(ac_power ~ dc_power, data = .) %>%
-  tidy() %>%
-  add_column(plant_id = plant_ids[2], .before = "term")
-
-full_fit <- generation %>%
-  lm(ac_power ~ dc_power, data = .) %>%
-  tidy() %>%
-  add_column(plant_id = "both", .before = "term")
-
-plant_1_fit %>%
-  bind_rows(plant_2_fit) %>%
-  bind_rows(full_fit)
-
-generation %>%
+solar %>%
   ggplot(aes(x = dc_power, y = ac_power, color = plant_id)) +
   geom_point(alpha = 0.25) +
-  geom_abline(slope = full_fit$estimate[2], 
-              intercept = full_fit$estimate[1],
+  geom_abline(slope = fit$coefficients[2], 
+              intercept = fit$coefficients[1],
               size = 1) +
   labs(title = "AC Power Produced per DC Power In",
        x = "DC Power",
@@ -539,82 +591,61 @@ generation %>%
 
 #### IRRADIATION TO TEMPERATURE ####
 
-# Periodicity of ambient_temperature plant 1
-weather %>%
-  filter(plant_id == plant_ids[1]) %>%
+# Relationship between module temperature and ambient temperature
+solar %>%
   mutate(time = as_datetime(as_hms(date_time))) %>%
   group_by(time) %>%
   ggplot(aes(x = ambient_temperature, y = module_temperature, color = time)) +
   geom_point()
 
-# Periodicity of ambient_temperature plant 2
-weather %>%
-  filter(plant_id == plant_ids[2]) %>%
+solar %>%
   mutate(time = as_datetime(as_hms(date_time))) %>%
   group_by(time) %>%
-  ggplot(aes(x = ambient_temperature, y = module_temperature, color = time)) +
-  geom_point()
+  summarize(avg_amb_temp = mean(ambient_temperature, na.rm = TRUE),
+            avg_mod_temp = mean(module_temperature, na.rm = TRUE)) %>%
+  ggplot(aes(x = time)) +
+  geom_line(aes(y = avg_amb_temp, color = "Average Ambient Temperature")) +
+  geom_line(aes(y = avg_mod_temp, color = "Average Module Temperature"))
+### !! Ambient temperature -lags- module temperature, suggesting if anything
+###  causality would be that high module temperature is affecting ambient temp reading
 
-# Periodicity of module_temperature plant 1
-weather %>%
-  filter(plant_id == plant_ids[1]) %>%
-  mutate(time = as_datetime(as_hms(date_time))) %>%
-  group_by(time) %>%
-  ggplot(aes(x = irradiation, y = module_temperature, color = time)) +
-  geom_point() 
-
-# Periodicity of module_temperature plant 2
-weather %>%
-  filter(plant_id == plant_ids[2]) %>%
+# Relationship between irradiation and module temperature
+solar %>%
   mutate(time = as_datetime(as_hms(date_time))) %>%
   group_by(time) %>%
   ggplot(aes(x = irradiation, y = module_temperature, color = time)) +
   geom_point() 
 
-# Periodicity of irradiation plant 1
-weather %>%
-  filter(plant_id == plant_ids[1]) %>%
+solar %>%
   mutate(time = as_datetime(as_hms(date_time))) %>%
   group_by(time) %>%
-  ggplot(aes(x = irradiation, y = module_temperature, color = time)) +
-  geom_point()
+  summarize(avg_irradiation = 20 + 40 *  mean(irradiation, na.rm = TRUE),
+            avg_mod_temp = mean(module_temperature, na.rm = TRUE)) %>%
+  ggplot(aes(x = time)) +
+  geom_line(aes(y = avg_irradiation, color = "Average Irradiation (+20, x40)")) +
+  geom_line(aes(y = avg_mod_temp, color = "Average Module Temperature"))
+### Irradiation leads ambient temperature by 15 minutes to a half an hour
 
-# Periodicity of irradiation plant 2
-weather %>%
-  filter(plant_id == plant_ids[2]) %>%
-  mutate(time = as_datetime(as_hms(date_time))) %>%
-  group_by(time) %>%
-  ggplot(aes(x = irradiation, y = module_temperature, color = time)) +
-  geom_point()
 
-weather %>%
-  filter(plant_id == plant_ids[1]) %>%
+### Relationship between irradiation and ambient temperature
+solar %>%
   mutate(time = as_datetime(as_hms(date_time))) %>%
   group_by(time) %>%
   ggplot(aes(x = irradiation, y = ambient_temperature, color = time)) +
   geom_point()
 
-weather %>%
-  filter(plant_id == plant_ids[2]) %>%
-  mutate(time = as_datetime(as_hms(date_time))) %>%
-  group_by(time) %>%
-  ggplot(aes(x = irradiation, y = ambient_temperature, color = time)) +
-  geom_point()
 
-plant_1_fit <- weather %>%
-  filter(plant_id == plant_ids[1]) %>%
-  lm(ambient_temperature ~ irradiation, data = .) %>%
-  tidy() %>%
-  add_column(plant_id = plant_ids[1], .before = "term")
-
-weather %>%
-  ggplot(aes(x = irradiation, y = ambient_temperature)) +
-  geom_point()
-
+acf <- ccf(weather %>% na.omit() %>% pull(irradiation),
+    solar %>% na.omit() %>% pull(module_temperature),
+    lag.max = 30,
+    plot = FALSE)
   
+tibble(lag = c(acf$lag),
+       acf = c(acf$acf)) %>%
+  slice_max(acf)
 
 ### FROM THIS: I am going to conclude that temperature is highly  correlated
-### to irradiation and time.
+### to irradiation and time. 
 ### AC is directly correlated to DC. 
 # Let's start building our model based on: 
 # 1) irradiation
@@ -622,176 +653,111 @@ weather %>%
 # 3) ambient temperature
 # 4) time
 
-RMSE <- function(predicted_power, test_power){
-  sqrt(mean((test_power - predicted_power)^2))
-}
-
 set.seed(1)
 test_index <- solar %>%
-  filter(plant_id == "4135001") %>%
   na.omit() %>%
   pull(dc_power) %>%
   createDataPartition(times = 1, p = 0.2, list = FALSE)
 
 train_set <- solar %>% 
-  filter(plant_id == "4135001") %>% 
   na.omit() %>% 
   slice(- test_index)
-test_set <- solar %>% 
-  filter(plant_id == "4135001") %>%
+
+test_set <- solar %>%
   na.omit() %>% 
   slice(test_index)
 
 ########    NAIVE RMSE    ####
-mu_hat <- mean(train_set$dc_power)
-naive_rmse <- RMSE(mu_hat, test_set$dc_power) # 4077.328
-results <- tibble(method = "Average", naive_rmse)
+mu_hat <- mean(train_set$dc_power) #  3198.53
+naive_rmse <- RMSE(mu_hat, test_set$dc_power) # 4083.851
+results <- tibble(method = "Average", RMSE = naive_rmse)
 
+########### IRRADIATION
+fit <- lm(dc_power ~ irradiation, data = train_set)
+
+train_set %>%
+  ggplot(aes(irradiation, dc_power, color = plant_id)) +
+  geom_point(alpha = 0.1) +
+  geom_abline(slope = fit$coefficients[2],
+              intercept = fit$coefficients[1],
+              size = 1.5)
+  
+predicted_power <- predict(fit, newdata = test_set)
+
+irradiation_rmse <- RMSE(predicted_power, test_set$dc_power) # 583.1007
+results <- results %>%
+  add_row(method = "Irradiation Effect", RMSE = irradiation_rmse)
+
+########### SENSOR FAULTS
 fit <- train_set %>%
-  lm(dc_power ~ irradiation, data = .) %>%
-  tidy()
+  filter(!(irradiation > 0 & dc_power == 0)) %>%
+  lm(dc_power ~ irradiation, data = .)
 
 train_set %>%
   ggplot(aes(irradiation, dc_power, color = plant_id)) +
   geom_point(alpha = 0.1) +
-  geom_abline(slope = fit_1$estimate[2], intercept = fit_1$estimate[1], size = 1.5, color = "red") +
-  geom_abline(slope = fit_2$estimate[2], intercept = fit_2$estimate[1], size = 1.5, color = "blue") +
-  geom_abline(slope = fit_both$estimate[2], intercept = fit_both$estimate[1], size = 1.5)
-  
+  geom_abline(slope = fit$coefficients[2],
+              intercept = fit$coefficients[1],
+              size = 1.5)
+
 predicted_power <- test_set %>%
-  mutate(pred = fit_both$estimate[1] + fit_both$estimate[2] * irradiation) %>%
+  mutate(pred = predict(fit, newdata = .)) %>%
+  mutate(pred = ifelse(irradiation == 0, 0, pred)) %>%
   pull(pred)
 
-RMSE(predicted_power, test_set$dc_power) # 1836.379
+irradiation_fault_rmse <- RMSE(predicted_power, test_set$dc_power) # 581.7728
+results <- results %>%
+  add_row(method = "Irradiation + Fault Effect", RMSE = irradiation_fault_rmse)
 
-fit_1 <- train_set %>%
-  filter(irradiation > 0 & dc_power > 0 & plant_id == plant_ids[1]) %>%
-  lm(dc_power ~ irradiation, data = .) %>%
-  tidy()
-
-fit_2 <- train_set %>%
-  filter(irradiation > 0 & dc_power > 0 & plant_id == plant_ids[2]) %>%
-  lm(dc_power ~ irradiation, data = .) %>%
-  tidy()
-
-fit_both <- train_set %>%
-  filter(irradiation > 0 & dc_power > 0) %>%
-  lm(dc_power ~ irradiation, data = .) %>%
-  tidy()
-
+################## Temperature effect
 train_set %>%
-  ggplot(aes(irradiation, dc_power, color = plant_id)) +
-  geom_point(alpha = 0.1) +
-  geom_abline(slope = fit_1$estimate[2], intercept = fit_1$estimate[1], size = 1.5, color = "red") +
-  geom_abline(slope = fit_2$estimate[2], intercept = fit_2$estimate[1], size = 1.5, color = "blue") +
-  geom_abline(slope = fit_both$estimate[2], intercept = fit_both$estimate[1], size = 1.5)
-
-predicted_power <- test_set %>%
-  filter(plant_id == plant_ids[1]) %>%
-  mutate(pred = fit_1$estimate[1] + fit_1$estimate[2] * irradiation) %>%
-  mutate(pred = ifelse(irradiation == 0 | pred < 0, 0, pred)) %>%
-  pull(pred)
-
-RMSE(predicted_power, test_set %>% filter(plant_id == plant_ids[1]) %>% pull(dc_power)) # 589.5741
-
-predicted_power <- test_set %>%
-  filter(plant_id == plant_ids[2]) %>%
-  mutate(pred = fit_2$estimate[1] + fit_2$estimate[2] * irradiation) %>%
-  mutate(pred = ifelse(irradiation == 0 | pred < 0, 0, pred)) %>%
-  pull(pred)
-
-RMSE(predicted_power, test_set %>% filter(plant_id == plant_ids[2]) %>% pull(dc_power)) # 2623.118
-
-predicted_power <- test_set %>%
-  mutate(pred = fit_both$estimate[1] + fit_both$estimate[2] * irradiation) %>%
-  mutate(pred = ifelse(irradiation == 0 | pred < 0, 0, pred)) %>%
-  pull(pred)
-
-RMSE(predicted_power, test_set %>% pull(dc_power)) # 1927.581
-
-####### The noise present in plant 2, seemingly as a result of faulty panels, 
-# makes prediction difficult without first developing an outlier detection
-# method. Since the scope of this project encapsulates predictions, we will
-# REMOVE the problem sources. Plant 2 seems to be a problem. Can we be more
-# precise?
-
-solar %>%
-  na.omit() %>%
-  group_by(plant_id, generation_source) %>%
-  summarize(n = sum((dc_power == 0 & irradiation > 0))) %>%
-  ggplot(aes(x = reorder(generation_source, desc(n)), y = n, fill = plant_id)) +
-  geom_col()
-
-solar %>%
-  group_by(plant_id, generation_source) %>%
-  summarize(n = sum(is.na(dc_power) | is.na(irradiation))) %>%
-  ggplot(aes(x = reorder(generation_source, desc(n)), y = n, fill = plant_id)) +
-  geom_col()
-
-solar %>%
-  group_by(plant_id, generation_source) %>%
-  mutate(is_na = is.na(dc_power) | is.na(irradiation)) %>%
-  mutate(likely_na = !is_na & dc_power == 0 & irradiation > 0) %>%
-  summarize(na_rate = mean(is_na), likely_na_rate = mean(likely_na)) %>%
-  ggplot(aes(x = na_rate, y = likely_na_rate, color = plant_id)) +
-  geom_point()
-
-# Meaning most of the likely_na's are probably na's. Not knowing the cause of
-#  the failures and requiring additional analysis to tease out correlations,
-#  we will work only with plant 4135001 moving forward
-train_set <- train_set %>%
-  filter(plant_id == "4135001")
-
-test_set <- test_set %>%
-  filter(plant_id == "4135001")
-
-
-### It looks like the first three are particularly aggregious.
-# high_na_sources <- train_set %>%
-#   group_by(generation_source) %>%
-#   summarize(n_outliers = sum((dc_power == 0 & irradiation > 0) | is.na(dc_power) | is.na(irradiation))) %>%
-#   slice_max(n_outliers, n = 4) %>%
-#   pull(generation_source)
-# 
-# high_na_sources
-  
-
-train_set %>%
-  mutate(dc_power_resid = dc_power - irradiation * fit_both$estimate[2] - fit_both$estimate[1]) %>%
+  mutate(dc_power_resid = dc_power - irradiation * fit$estimate[2] - fit$estimate[1]) %>%
   mutate(dc_power_resid = ifelse(dc_power == 0, 0, dc_power_resid)) %>%
   group_by(plant_id) %>%
   ggplot(aes(module_temperature, dc_power_resid, color = plant_id)) +
   geom_point(alpha = 0.05) +
-  geom_smooth()
+  geom_smooth(color = "black")
 
 # Suggests an optimal operating temperature between 20 and 54 degrees.
 # Module temperature best represented by parabola
 fit <- train_set %>%
   filter(!(irradiation > 0 & dc_power == 0)) %>%
   mutate(module_temperature_sq = module_temperature ^ 2) %>%
-  lm(dc_power ~ irradiation + module_temperature + module_temperature_sq, data = .) %>%
-  tidy()
+  lm(dc_power ~ irradiation + module_temperature + module_temperature_sq, data = .)
 
 train_set %>%
   mutate(dc_power_resid = dc_power 
-         - fit$estimate[1] 
-         - irradiation * fit$estimate[2] 
-         - module_temperature * fit$estimate[3]
-         - module_temperature ^ 2 * fit$estimate[4]) %>%
+         - fit$coefficients[1] 
+         - irradiation * fit$coefficients[2] 
+         - module_temperature * fit$coefficients[3]
+         - module_temperature ^ 2 * fit$coefficients[4]) %>%
   mutate(dc_power_resid = ifelse(dc_power == 0, 0, dc_power_resid)) %>%
   ggplot(aes(ambient_temperature, dc_power_resid, color = plant_id)) +
   geom_point(alpha = 0.1) +
-  geom_smooth()
-
-fit <- train_set %>%
-  filter(!(irradiation > 0 & dc_power == 0)) %>%
-  mutate(module_temperature_sq = module_temperature ^ 2) %>%
-  lm(dc_power ~ irradiation + module_temperature + module_temperature_sq, data = .)
+  geom_smooth(color = "black")
 
 predicted_power <- test_set %>%
   mutate(module_temperature_sq = module_temperature ^ 2) %>%
-  predict(fit, .)
-RMSE(predicted_power, test_set$dc_power) # 568.5238
+  predict(fit, newdata = .)
+irradiation_fault_module_temperature_rmse <- 
+  RMSE(predicted_power, test_set$dc_power) # 555.7686
+results <- results %>%
+  add_row(method = "Irradiation + Fault Effect + Module Temperature", 
+          RMSE = irradiation_fault_module_temperature_rmse)
+
+##### Time Effect
+train_set %>%
+  filter(date_time < make_date(2020, 5, 20) & date_time > make_date(2020, 5, 19)) %>%
+  mutate(dc_power_resid = dc_power 
+         - fit$coefficients[1] 
+         - irradiation * fit$coefficients[2] 
+         - module_temperature * fit$coefficients[3]
+         - module_temperature ^ 2 * fit$coefficients[4]) %>%
+  mutate(dc_power_resid = ifelse(dc_power == 0, 0, dc_power_resid)) %>%
+  ggplot(aes(x = date_time, dc_power_resid)) +
+  geom_point(alpha = 0.1, aes(color = generation_source)) +
+  geom_smooth() +
+  theme(legend.position = "none")
 
 train_set %>%
   mutate(module_temperature_sq = module_temperature ^ 2) %>%
@@ -804,6 +770,9 @@ test_set %>%
   mutate(pred = predict(fit, new_data = .))
 
 
+
+
 ################################################################################
 # Predictions and RMSE
 ################################################################################
+# Use Forecast and Arima to model time series
