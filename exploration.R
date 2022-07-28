@@ -2,6 +2,11 @@ library(tidyverse)
 library(lubridate)
 library(hms)
 library(broom)
+library(forecast)
+library(fable) # Requires installing "feasts" package
+library(ranger)
+library(randomForest)
+library(pls)
 library(caret)
 
 
@@ -229,7 +234,8 @@ dim(solar) # 126720     11
 # precise?
 
 solar %>%
-  filter((dc_power == 0 & irradiation > 0) | is.na(dc_power)) %>%
+  na.omit() %>%
+  filter((dc_power == 0 & irradiation > 0)) %>%
   ggplot(aes(x = date_time, fill = plant_id, color = plant_id)) +
   geom_bar() +
   labs(title = "Sensor Failures and Anomalies Over Time",
@@ -286,7 +292,7 @@ solar %>%
   ggplot(aes(x = reorder(generation_source, desc(n)), y = n, fill = plant_id)) +
   geom_col() +
   theme(axis.text.x = element_text(angle = 90)) +
-  labs(title = "Combined Sensor Anamoly and Failure Count Per Sensor",
+  labs(title = "Combined Sensor Failure Count Per Sensor",
        x = "Generation Source Key",
        y = "Count")
 
@@ -307,8 +313,6 @@ solar %>%
 #  we will work only with plant 4135001 moving forward
 solar <- solar %>%
   filter(plant_id == "4135001")
-
-rm(plant_1_generation, plant_1_weather)
 
 nrow(solar) # 63360
 
@@ -558,7 +562,11 @@ weather %>%
 ################################################################################
 ############################ REGRESSION ANALYSIS ###############################
 ################################################################################
-
+solar %>%
+  na.omit() %>%
+  select(dc_power, ac_power) %>%
+  cor() %>%
+  .[1, 2]
 
 #### AC Power vs DC Power ####
 
@@ -566,13 +574,6 @@ solar %>%
   ggplot(aes(x = dc_power, y = ac_power, color = plant_id)) +
   geom_point(alpha = 0.25) +
   geom_abline()
-
-get_lse <- function(x, y){
-  fit <- lm(y ~ x)
-  tibble(term = names(fit$coefficients),
-         slope = fit$coefficients, 
-         se = summary(fit)$coefficient[,2])
-}
 
 fit <- solar %>%
   lm(ac_power ~ dc_power, data = .)
@@ -634,15 +635,51 @@ solar %>%
   ggplot(aes(x = irradiation, y = ambient_temperature, color = time)) +
   geom_point()
 
+############ LAG in the weather
+acf <- ccf(weather$module_temperature,
+           weather$irradiation,
+           na.action = na.pass,
+           lag.max = 48)
 
-acf <- ccf(weather %>% na.omit() %>% pull(irradiation),
-    solar %>% na.omit() %>% pull(module_temperature),
-    lag.max = 30,
-    plot = FALSE)
-  
 tibble(lag = c(acf$lag),
        acf = c(acf$acf)) %>%
   slice_max(acf)
+
+#Confirmed lag of 15 minutes between irradiation and module temperature
+
+acf <- ccf(weather$ambient_temperature,
+           weather$irradiation,
+           na.action = na.pass,
+           lag.max = 48)
+
+tibble(lag = c(acf$lag),
+       acf = c(acf$acf)) %>%
+  slice_max(acf)
+
+# Lag of 2 hours, 15 minutes between irradiation and ambient temperature
+
+
+acf <- ccf(weather$ambient_temperature,
+           weather$module_temperature,
+           na.action = na.pass,
+           lag.max = 48)
+
+tibble(lag = c(acf$lag),
+       acf = c(acf$acf)) %>%
+  slice_max(acf)
+
+# Lag of 1 hour, 30 minutes between ambient temperature and module temperature
+
+
+acf <- ccf(solar %>% pull(dc_power),
+           solar %>% pull(irradiation),
+           na.action = na.pass,
+           lag.max = 25)
+
+tibble(lag = c(acf$lag),
+       acf = c(acf$acf)) %>%
+  slice_max(acf)
+
 
 ### FROM THIS: I am going to conclude that temperature is highly  correlated
 ### to irradiation and time. 
@@ -654,23 +691,30 @@ tibble(lag = c(acf$lag),
 # 4) time
 
 set.seed(1)
-test_index <- solar %>%
-  na.omit() %>%
-  pull(dc_power) %>%
-  createDataPartition(times = 1, p = 0.2, list = FALSE)
-
-train_set <- solar %>% 
-  na.omit() %>% 
-  slice(- test_index)
+# test_index <- solar %>%
+#   na.omit() %>%
+#   pull(dc_power) %>%
+#   createDataPartition(times = 1, p = 0.2, list = FALSE)
+# 
+# train_set <- solar %>% 
+#   na.omit() %>% 
+#   slice(- test_index)
+# 
+# test_set <- solar %>%
+#   na.omit() %>% 
+#   slice(test_index)
 
 test_set <- solar %>%
-  na.omit() %>% 
-  slice(test_index)
+  filter(date_time > make_date(2020, 06, 12))
+
+train_set <- solar %>%
+  anti_join(test_set)
 
 ########    NAIVE RMSE    ####
-mu_hat <- mean(train_set$dc_power) #  3198.53
-naive_rmse <- RMSE(mu_hat, test_set$dc_power) # 4083.851
+mu_hat <- mean(train_set$dc_power, na.rm = TRUE) # 321.0874
+naive_rmse <- RMSE(mu_hat, test_set$dc_power) # 401.8058
 results <- tibble(method = "Average", RMSE = naive_rmse)
+
 
 ########### IRRADIATION
 fit <- lm(dc_power ~ irradiation, data = train_set)
@@ -680,7 +724,7 @@ train_set %>%
   geom_point(alpha = 0.1) +
   geom_abline(slope = fit$coefficients[2],
               intercept = fit$coefficients[1],
-              size = 1.5)
+              size = 1)
   
 predicted_power <- predict(fit, newdata = test_set)
 
@@ -688,31 +732,10 @@ irradiation_rmse <- RMSE(predicted_power, test_set$dc_power) # 583.1007
 results <- results %>%
   add_row(method = "Irradiation Effect", RMSE = irradiation_rmse)
 
-########### SENSOR FAULTS
-fit <- train_set %>%
-  filter(!(irradiation > 0 & dc_power == 0)) %>%
-  lm(dc_power ~ irradiation, data = .)
-
-train_set %>%
-  ggplot(aes(irradiation, dc_power, color = plant_id)) +
-  geom_point(alpha = 0.1) +
-  geom_abline(slope = fit$coefficients[2],
-              intercept = fit$coefficients[1],
-              size = 1.5)
-
-predicted_power <- test_set %>%
-  mutate(pred = predict(fit, newdata = .)) %>%
-  mutate(pred = ifelse(irradiation == 0, 0, pred)) %>%
-  pull(pred)
-
-irradiation_fault_rmse <- RMSE(predicted_power, test_set$dc_power) # 581.7728
-results <- results %>%
-  add_row(method = "Irradiation + Fault Effect", RMSE = irradiation_fault_rmse)
 
 ################## Temperature effect
 train_set %>%
-  mutate(dc_power_resid = dc_power - irradiation * fit$estimate[2] - fit$estimate[1]) %>%
-  mutate(dc_power_resid = ifelse(dc_power == 0, 0, dc_power_resid)) %>%
+  mutate(dc_power_resid = dc_power - irradiation * fit$coefficients[2] - fit$coefficients[1]) %>%
   group_by(plant_id) %>%
   ggplot(aes(module_temperature, dc_power_resid, color = plant_id)) +
   geom_point(alpha = 0.05) +
@@ -721,56 +744,197 @@ train_set %>%
 # Suggests an optimal operating temperature between 20 and 54 degrees.
 # Module temperature best represented by parabola
 fit <- train_set %>%
-  filter(!(irradiation > 0 & dc_power == 0)) %>%
   mutate(module_temperature_sq = module_temperature ^ 2) %>%
   lm(dc_power ~ irradiation + module_temperature + module_temperature_sq, data = .)
-
-train_set %>%
-  mutate(dc_power_resid = dc_power 
-         - fit$coefficients[1] 
-         - irradiation * fit$coefficients[2] 
-         - module_temperature * fit$coefficients[3]
-         - module_temperature ^ 2 * fit$coefficients[4]) %>%
-  mutate(dc_power_resid = ifelse(dc_power == 0, 0, dc_power_resid)) %>%
-  ggplot(aes(ambient_temperature, dc_power_resid, color = plant_id)) +
-  geom_point(alpha = 0.1) +
-  geom_smooth(color = "black")
 
 predicted_power <- test_set %>%
   mutate(module_temperature_sq = module_temperature ^ 2) %>%
   predict(fit, newdata = .)
-irradiation_fault_module_temperature_rmse <- 
-  RMSE(predicted_power, test_set$dc_power) # 555.7686
+irradiation_module_temperature_rmse <- 
+  RMSE(predicted_power, test_set$dc_power) # 40.03656
 results <- results %>%
-  add_row(method = "Irradiation + Fault Effect + Module Temperature", 
-          RMSE = irradiation_fault_module_temperature_rmse)
+  add_row(method = "Irradiation + Module Temperature", 
+          RMSE = irradiation_module_temperature_rmse)
 
-##### Time Effect
+################## Ambient Temperature effect
 train_set %>%
-  filter(date_time < make_date(2020, 5, 20) & date_time > make_date(2020, 5, 19)) %>%
   mutate(dc_power_resid = dc_power 
          - fit$coefficients[1] 
          - irradiation * fit$coefficients[2] 
          - module_temperature * fit$coefficients[3]
          - module_temperature ^ 2 * fit$coefficients[4]) %>%
-  mutate(dc_power_resid = ifelse(dc_power == 0, 0, dc_power_resid)) %>%
+  ggplot(aes(ambient_temperature, dc_power_resid, color = plant_id)) +
+  geom_point(alpha = 0.01) +
+  geom_smooth(color = "black")
+# Negligable
+
+
+##### Time Effect
+  
+
+############### ARIMA:1 Auto-Regressive Integrated Moving Average
+
+y_train <- train_set %>%
+  group_by(date_time) %>%
+  summarize(avg_dc_power = mean(dc_power, na.rm = TRUE)) %>%
+  pull(avg_dc_power) %>%
+  ts(frequency = 96) # 4 * 24 for every 15 minutes over 24 hours
+
+arima_result <- auto.arima(y = y, seasonal = TRUE)
+date_times <- test_set %>%
+  pull(date_time) %>%
+  unique()
+generation_sources <- solar %>%
+  pull(generation_source) %>%
+  unique()
+
+forecast_result <- forecast(arima_result, h = length(date_times)) %>% 
+  plot()
+predicted_power <- tibble(date_time = date_times, pred = forecast_result$mean)
+predicted_power <- expand_grid(date_time = date_times,
+                               generation_source = generation_sources) %>%
+  left_join(predicted_power, by = "date_time")
+
+arima_rmse <- RMSE(predicted_power$pred, test_set$dc_power) # 179.0664
+results <- results %>%
+  add_row(method = "ARIMA", RMSE = arima_rmse)
+
+############ GENERATION SOURCE
+train_set %>%
+  filter(date_time < make_date(2020, 5, 25) & date_time > make_date(2020, 5, 22)) %>%
+  mutate(dc_power_resid = dc_power 
+         - fit$coefficients[1] 
+         - irradiation * fit$coefficients[2] 
+         - module_temperature * fit$coefficients[3]
+         - module_temperature ^ 2 * fit$coefficients[4]) %>%
   ggplot(aes(x = date_time, dc_power_resid)) +
-  geom_point(alpha = 0.1, aes(color = generation_source)) +
-  geom_smooth() +
+  geom_line(alpha = 0.1, aes(color = generation_source)) +
   theme(legend.position = "none")
 
-train_set %>%
+### AVG by generation_source ::: NEGATIVE EFFECT
+fit <- train_set %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  lm(dc_power ~ irradiation + module_temperature + module_temperature_sq, data = .)
+predicted_power <- test_set %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  predict(fit, newdata = .)
+predicted_power <- predicted_power + train_set %>%
+  group_by(generation_source) %>%
+  summarize(avg_dc_power = mu_hat - mean(dc_power, na.rm = TRUE)) %>%
+  right_join(test_set) %>%
+  pull(avg_dc_power)
+  
+RMSE(predicted_power, test_set$dc_power) # 40.05285 WORSE than just lm
+  
+
+### AUTO ARIMA by GENERATION SOURCE
+ts_train_set <- train_set %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  as_tsibble(key = generation_source, index = date_time)
+  
+arima_models <- ts_train_set %>%
+  model(arima = ARIMA(dc_power ~ irradiation + module_temperature + module_temperature_sq))
+
+ts_test_set <- test_set %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  as_tsibble(key = generation_source, index = date_time)
+
+predicted_power <- forecast(arima_models, new_data = ts_test_set) %>%
+  arrange(date_time) %>%
+  pull(.mean)
+
+RMSE(predicted_power, test_set$dc_power) # 40.98546 WORSE THAN THE AVERAGE
+
+######### RANDOM FOREST
+train_set_wide <- train_set %>%
+  mutate(day = as.numeric(round_date(date_time, unit = "day") - make_datetime(2020, 05, 15)),
+         hour = as.numeric(hour(date_time)),
+         minute = as.numeric(minute(date_time)),
+         generation_source = as.factor(generation_source)) %>%
+  select(-ac_power, -date_time, -plant_id, -weather_source, -daily_yield, -total_yield) %>%
+  relocate(dc_power) %>%
+  na.omit()
+
+test_set_wide <- test_set %>%
+  mutate(day = as.numeric(round_date(date_time, unit = "day") - make_datetime(2020, 05, 15)),
+         hour = as.numeric(hour(date_time)),
+         minute = as.numeric(minute(date_time)),
+         generation_source = factor(generation_source)) %>%
+  select(-ac_power, -date_time, -plant_id, -weather_source, -daily_yield, -total_yield) %>%
+  relocate(dc_power) %>%
+  na.omit()
+
+# fit <- ranger(dc_power ~ .,
+#               data = train_set_wide,
+#               num.trees = 250,
+#               max.depth = 4,
+#               probability = TRUE)
+# fit <- train(dc_power ~ irradiation, data = train_set_wide, method = "rf", verbose = TRUE)
+fit <- randomForest(dc_power ~ .,
+             data = train_set_wide,
+             xtest = select(test_set_wide, -dc_power),
+             ytest = pull(test_set_wide, dc_power),
+             na.action = na.omit)
+
+
+
+### PCA
+
+train_set_wide <- train_set %>%
+  mutate(day = as.numeric(round_date(date_time, unit = "day") - make_datetime(2020, 05, 15)),
+         hour = as.numeric(hour(date_time)),
+         minute = as.numeric(minute(date_time)),
+         generation_source = as.factor(generation_source)) %>%
+  select(-generation_source, -ac_power, -date_time, -plant_id, -weather_source, -daily_yield, -total_yield) %>%
+  relocate(dc_power) %>%
+  na.omit()
+result <- prcomp(train_set_wide, scale = TRUE)
+result$rotation <- -1 * result$rotation
+result$rotation
+
+var_explained <- result$sdev ^ 2 / sum(result$sdev ^ 2) # suggests there is 1 big component, 4 smaller ones of about equal impact
+qplot(c(1:7), var_explained) + 
+  geom_line()
+
+
+set.seed(1)
+fit <- pcr(dc_power ~ ., data = train_set_wide, scale = TRUE, validation = "CV")
+summary(fit)
+
+test_set_wide <- test_set %>%
+  mutate(day = as.numeric(round_date(date_time, unit = "day") - make_datetime(2020, 05, 15)),
+         hour = as.numeric(hour(date_time)),
+         minute = as.numeric(minute(date_time)),
+         generation_source = factor(generation_source)) %>%
+  select(-generation_source, -ac_power, -date_time, -plant_id, -weather_source, -daily_yield, -total_yield) %>%
+  relocate(dc_power) %>%
+  na.omit()
+
+RMSEs <- sapply(c(1:6), function(n_comp){
+  predicted_power<- predict(fit, test_set_wide, ncomp = n_comp)
+  RMSE(predicted_power, test_set$dc_power)
+})
+qplot(c(1:6), RMSEs) +
+  geom_line()
+RMSEs # 143.60274 112.22240 112.30540 159.26567  55.68699  47.24632
+
+########### SENSOR FAULTS
+fit <- train_set %>%
+  filter(!(irradiation > 0 & dc_power == 0)) %>%
+  na.omit() %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  lm(dc_power ~ irradiation + module_temperature + module_temperature_sq, data = .)
+
+predicted_power <- test_set %>%
   mutate(module_temperature_sq = module_temperature ^ 2) %>%
   mutate(pred = predict(fit, newdata = .)) %>%
-  mutate(pred = ifelse(pred < 0 | irradiation == 0, 0, pred)) %>%
-  ggplot(aes(x = date_time)) +
-  geom_line(aes(y = pred))
+  mutate(pred = ifelse(is.na(irradiation) | irradiation == 0 | pred < 0, 0, pred)) %>%
+  pull(pred)
 
-test_set %>%
-  mutate(pred = predict(fit, new_data = .))
-
-
-
+all_factors_and_clamp <- RMSE(predicted_power, test_set$dc_power) # 581.7728
+results <- results %>%
+  add_row(method = "Clamp and Fault Detection", RMSE = all_factors_and_clamp)
+  
 
 ################################################################################
 # Predictions and RMSE
