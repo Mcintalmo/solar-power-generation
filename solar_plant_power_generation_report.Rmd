@@ -1,10 +1,9 @@
 ---
-title: "solar-plant-power-generation"
+title: "Predicting Solar Power Generation"
 author: "Alexander McIntosh"
 date: "7/15/2022"
 output:
-  pdf_document: default
-  html_document: default
+  bookdown::pdf_document2
 ---
 
 ```{r setup, include=FALSE}
@@ -19,7 +18,7 @@ knitr::opts_chunk$set(
 options(digits = 3)
 ```
 
-# Introduction
+# Introduction {#introduction}
 
 As the unintended consequences of traditional energy collection become untenable,
 the world is turning to alternative, renewable energy sources.
@@ -52,7 +51,7 @@ Or use command
 kaggle datasets download -d anikannal/solar-power-generation-data
 ```
 
-# Methods and Analysis
+# Methods and Analysis {#methods_and_analysis}
 
 This analysis was conducted entirely within R. 
 Packages included tidyverse and broom for data organization and transformation.
@@ -61,9 +60,10 @@ Tsibble, forecast, fable, and feasts provided the backbone of analysis of the da
 time series and use of the ARIMA model.
 Ranger, randomForest, pls, and caret all contributed functions for developing
 a machine learning model.
-kableExtra was used only in this report to generate more visually appealing tables.
+kableExtra and bookdown were used only in the report to generate more visually 
+appealing tables and visualizations.
 
-```{r packages, echo = FALSE}
+```{r packages}
 library(tidyverse)
 library(broom)
 library(lubridate)
@@ -78,7 +78,7 @@ library(pls)
 library(caret)
 library(kableExtra)
 ```
-## Data Collection
+## Data Collection {#data_collection}
 The data for this analysis was collected by two solar plants in India.
 The first plant, id: 4135001, is near Gandikotta, Andhra and the second plant,
 id: 4136001, is near Nasik, Maharashtra.
@@ -100,9 +100,9 @@ module, and the irradiation level.
 Owing to the sensors' reading of 0 at night, it is assumed any irradiation is
 owed entirely to the sun's radiation.
 
-## Data Cleaning
+## Data Cleaning {#data_cleaning}
 
-### The Raw Data
+### The Raw Data {#the_raw_data}
 The data are spread out over four comma separated files; two power generation 
 files and two weather sensor files, one each for each plant. 
 First, the data are read into memory, using lubridate to parse the time stamp,
@@ -112,8 +112,8 @@ other three files.
 This suggests human input or conversion was involved in the collection of
 the data.
 
-### Loading the Data
-```{r load_data}
+### Loading the Data {#loading_the_data}
+```{r}
 parse_generation_data <- function(file_name,
                                   date_format = "ymd HM",
                                   data_path = "./data/") {
@@ -137,6 +137,10 @@ parse_generation_data <- function(file_name,
              total_yield)
 }
 
+generation <- 
+  parse_generation_data("Plant_1_Generation_Data.csv", "dmy HM") %>%
+  bind_rows(parse_generation_data("Plant_2_Generation_Data.csv", "ymd HMS"))
+
 
 parse_weather_data <- function(file_name, data_path = "./data/") {
   read.csv(paste0(data_path, file_name)) %>%
@@ -156,45 +160,71 @@ parse_weather_data <- function(file_name, data_path = "./data/") {
              irradiation)
 }
 
+weather <- parse_weather_data("Plant_1_Weather_Sensor_Data.csv") %>%
+  bind_rows(parse_weather_data("Plant_2_Weather_Sensor_Data.csv"))
+```
 
-generation <- 
-  parse_generation_data("Plant_1_Generation_Data.csv", "dmy HM") %>%
-  bind_rows(parse_generation_data("Plant_2_Generation_Data.csv", "ymd HMS"))
-
-dim(generation)
-head(generation) %>%
-  kbl() %>%
+```{r}
+generation %>%
+  dim() %>%
+  as_tibble() %>%
+  add_column(dimension = c("Observations", "Variables")) %>%
+  pivot_wider(names_from = dimension, values_from = value) %>%
+  kable(caption =  "Power Generation Data Dimensions") %>%
   kable_material()
+```
+
+```{r}
+generation %>% 
+  slice_head(n = 5) %>%
+  kbl(caption = "First 5 Observations Of Power Generation Data") %>%
+  kable_material()
+```
+
+```{r,}
 generation %>%
   select(plant_id, source_key) %>%
   group_by(source_key) %>%
   slice(1) %>%
   pivot_wider(names_from = "plant_id", values_from = "source_key") %>%
   unnest() %>%
-  kbl() %>%
+  kbl(caption = "Power Generation Source Keys Separated by Plant ID") %>%
   kable_material()
 ```
+
 The generation data consist of 136476 observations of 7 variables: The time stamp,
 the plant id number, the inverter key, the measured DC power from the panels, 
 the measured AC after inversion, the daily yield of power, and the total yield
 that the sensor has ever recorded.
-```{r load_weather}
-weather <- parse_weather_data("Plant_1_Weather_Sensor_Data.csv") %>%
-  bind_rows(parse_weather_data("Plant_2_Weather_Sensor_Data.csv"))
 
-dim(weather)
-head(weather) %>% 
-  kbl() %>%
+```{r,}
+weather %>% 
+  dim() %>%
+  as_tibble() %>%
+  add_column(dimension = c("Observations", "Variables")) %>%
+  pivot_wider(names_from = dimension, values_from = value) %>%
+  kbl(caption = "Weather Data Dimensions") %>%
   kable_material()
+```
+
+```{r,}
+weather %>%
+  slice_head(n = 5) %>%
+  kbl(caption = "First 5 Observations Of Weather Data") %>%
+  kable_material()
+```
+
+```{r}
 weather %>%
   select(plant_id, source_key) %>%
   group_by(source_key) %>%
   slice(1) %>%
   pivot_wider(names_from = "plant_id", values_from = "source_key") %>%
   unnest() %>%
-  kbl() %>%
+  kbl(caption = "Weather Data Source Keys Separated by Plant ID") %>%
   kable_material()
 ```
+
 The weather data consist of only 6441 observations of 6 variables: The time stamp
 of the observations at 15 minute intervals, the plant id at which the observation
 was taken, the weather sensor key (identical accross the plant), the ambient
@@ -202,22 +232,25 @@ temperature in Celsius, the module temperature in Celsius, and the irradiation.
 The difference in the number of observations owes to the number of sensors.
 Each plant has 22 units recording power generation data, and 1 sensor recording
 weather data.
-```{r, echo = FALSE}
+
+```{r}
 rm(parse_generation_data, parse_weather_data)
 ```
 
-### Sanity Checks
-First, let us take a look at a summary of the generation data by plant.
-```{r plant_summary, echo = FALSE}
+### Sanity Checks {#sanity_checks}
+First, let us take a look at a summary of the generation data by plant in figure \@ref(fig:dc_power_distribution_by_plant).
+```{r}
 generation %>% 
   group_by(plant_id) %>%
   summarize(min_dc = min(dc_power),
             max_dc = max(dc_power),
             median_dc = median(dc_power),
             mean_dc = mean(dc_power)) %>%
-  kbl(caption = "DC Ppower Summary by Plant") %>%
+  kbl(caption = "DC Power Summary by Plant") %>%
   kable_material()
+```
 
+```{r}
 generation %>%
   group_by(plant_id) %>%
   ggplot(aes(x = dc_power, fill = plant_id))+
@@ -238,7 +271,7 @@ It would be expected that the sun is out for more than half of the observations.
 
 To better understand what might be happening, let us compare the DC output of
 the solar panels to the AC output after conversion.
-```{r, echo = FALSE}
+```{r}
 generation %>%
   ggplot(aes(x = dc_power, y = ac_power)) +
   geom_point(aes(color = plant_id)) +
@@ -262,24 +295,16 @@ plant 4135001 by a factor of 10.
 The conversion error is assumed for the remainder of the analysis, and the 
 DC power values for plant 4135001 are divided by 10.
 
-### Missing Observations
+### Missing Observations {#missing_observations}
 As noted previously, there were 136476 power generation observations made.
 However, if an observation is made every 15 minutes at 44 sensors for 34 days,
-we expect to see
-```{r}
-60 / 15 *24 * 34 * 44
-```
-143616 observations. 
+we expect to see 143616 observations. 
 
-The remaining 
-```{r}
-143616 - 136476
-```
-7140 observations are missing, and will be considered NA for time series analysis.
+The remaining 7140 observations are missing, and will be considered NA for time series analysis.
 Can a pattern to the missing values be found?
 To start, we will fill in the missing time values and combine the weather 
 data.
-```{r join_generation_weather}
+```{r}
 join_generation_weather <- function(generation_data, weather_data) {
   generation_data %>%
     group_by(plant_id) %>%
@@ -292,16 +317,28 @@ join_generation_weather <- function(generation_data, weather_data) {
     full_join(weather_data, by = c("date_time", "plant_id")) %>% # Add weather data
     rename(weather_source = source_key) # Rename duplicated variable name
 }
+```
 
+```{r}
 solar <- join_generation_weather(generation, weather)
-head(solar) %>%
-  kbl() %>%
+solar %>%
+  slice_head(n = 5) %>%
+  kbl(caption = "First 5 Observations in Solar Data") %>%
   kable_material()
-dim(solar)
+```
+
+```{r}
+solar %>%
+  dim() %>%
+  as_tibble() %>%
+  add_column(dimension = c("Observations", "Variables")) %>%
+  pivot_wider(names_from = dimension, values_from = value) %>%
+  kbl(caption = "Solar Data Dimensions") %>%
+  kable_material()
 ```
 143616 observations of 11 distinct variables, all times are now accounted for.
 
-```{r, echo = FALSE}
+```{r}
 solar %>%
   anti_join(generation, by = c("plant_id", "date_time", "generation_source" = "source_key")) %>%
   ggplot(aes(x = date_time, fill = plant_id, color = plant_id)) +
@@ -315,7 +352,7 @@ The above graph shows the number of missing values from power sensors over time.
 Notably, missing values at plant 4135001 seem to go across all 22 sensors.
 Additionally, For much of the last week of may, plant 4136001 had about 4
 power generation sensors that were offline.
-```{r, echo = FALSE}
+```{r}
 solar %>%
   select(date_time, plant_id) %>%
   unique() %>%
@@ -332,7 +369,7 @@ Note that  many of the missing values of one or both weather sensors align with
 missing values of the generation sensors as well.
 This might suggest maintenance or a failure of a kind that affected the entire plant.
 
-```{r, echo = FALSE}
+```{r}
 solar %>%
   na.omit() %>%
   filter((dc_power == 0 & irradiation > 0)) %>%
@@ -349,7 +386,7 @@ Without more information, it is hard to tell exactly what is happening in these
 cases.
 For example, is it true that the panels are not actually producing DC power, 
 or is it the case simply that the power sensor is not detecting the generated power.
-```{r source_na, echo = FALSE}
+```{r}
 solar %>%
   group_by(plant_id, generation_source) %>%  
   filter((dc_power == 0 & irradiation > 0) | is.na(dc_power)) %>%
@@ -369,7 +406,7 @@ observations broken down for each source.
 It is clear that plant 4136001 experiences many more problems, with four sources
 contributing many problems.
 Even the best 4136001 sensor performs worse than the worst 4135001 sensor.
-```{r, echo = FALSE}
+```{r}
 solar %>%
   na.omit() %>%
   group_by(plant_id, generation_source) %>%
@@ -380,7 +417,9 @@ solar %>%
   labs(title = "Anomaly Count Per Sensor",
        x = "Generation Source Key",
        y = "Count")
+```
 
+```{r}
 solar %>%
   group_by(plant_id, generation_source) %>%
   summarize(n = sum(is.na(dc_power) | is.na(irradiation))) %>%
@@ -390,7 +429,9 @@ solar %>%
   labs(title = "Combined Sensor Failure Count Per Sensor",
        x = "Generation Source Key",
        y = "Count")
+```
 
+```{r}
 solar %>%
   group_by(plant_id, generation_source) %>%
   mutate(is_na = is.na(dc_power) | is.na(irradiation)) %>%
@@ -410,7 +451,7 @@ The plant 4136001 cluster shows the healthiest collection of data, while
 plant 4135001 clusters suggest that less missing data from a set does not
 necessarily mean that the data is more trustworthy.
 
-```{r total_yield}
+```{r}
 solar %>%
   filter(plant_id == "4135001") %>%
   ggplot(aes(x = date_time, y = total_yield, color = generation_source)) +
@@ -419,7 +460,9 @@ solar %>%
   labs(title = "Plant 4135001 Total Yield Over Time",
        x = "Time",
        y = "Total Yield")
+```
 
+```{r}
 solar %>%
   filter(plant_id == "4136001") %>%
   ggplot(aes(x = date_time, y = total_yield, color = generation_source)) +
@@ -437,7 +480,7 @@ This, combined with the evidence provided by analyzing the DC power output
 of the panels, justifies removal of plant 4136001 from the data set for model
 development.
 
-## Data Validation
+## Separating Validation Data {#separating_validation_data}
 To best determine the overall efficacy of predictive models, the data sets
 were broken into a validation set and a training set.
 There were 34 days in the entire data set. 
@@ -470,13 +513,13 @@ weather_train <- weather %>%
 solar <- join_generation_weather(generation_train, weather_train)
 ```
 
-## Data Exploration
+## Data Exploration {#data_exploration}
 The data has been cleaned.
 A validation set has been partitioned.
 Before models could be constructed, the data must be further explored to identify
 patterns.
-### Generation
-```{r, echo = FALSE}
+### Generation {#generation}
+```{r,}
 generation_train %>%
   select(dc_power, ac_power, daily_yield) %>%
   summarize_all(list(min = min, max = max, median = median, mean = mean, sd = sd)) %>%
@@ -485,7 +528,9 @@ generation_train %>%
                names_to = c("Variable", ".value")) %>%
   kbl(caption = "Summary of Power Generation Data") %>%
   kable_material()
+```
 
+```{r}
 generation_train %>%
   group_by(source_key) %>%
   ggplot(aes(x = source_key, y = dc_power)) +
@@ -494,7 +539,9 @@ generation_train %>%
   labs(title = "DC Power Output by Source",
        x = "Source Key",
        y = "DC Power")
+```
 
+```{r}
 generation_train %>%
   group_by(source_key) %>%
   ggplot(aes(x = source_key, y = ac_power)) +
@@ -504,6 +551,9 @@ generation_train %>%
        x = "Source Key",
        y = "AC Power")
 
+```
+
+```{r}
 generation_train %>%
   group_by(source_key) %>%
   ggplot(aes(x = source_key, y = daily_yield)) +
@@ -516,7 +566,7 @@ generation_train %>%
 The above table and box plots show that the power generation across sources
 was very consistent, with a few sources showing slight variations.
 
-```{r, echo = FALSE}
+```{r}
 generation_train %>%
   group_by(source_key) %>%
   ggplot(aes(x = source_key, y = total_yield)) +
@@ -525,7 +575,9 @@ generation_train %>%
   labs(title = "Total Yield by Source",
        x = "Source Key",
        y = "Total Yield")
+```
 
+```{r}
 generation_train %>%
   group_by(source_key) %>%
   mutate(total_yield = total_yield - min(total_yield)) %>%
@@ -536,6 +588,7 @@ generation_train %>%
        x = "Source Key",
        y = "Difference in Total Yield")
 ```
+
 Looking at the total yield observed by each source reinforces the view that
 each power generator at plant 435001 performed similarly. 
 Note that the second graph accounts for the cumulative yield at the start of the
@@ -543,8 +596,7 @@ month, thus showing much less variation.
 The first graph reveals which of the power generation sensors have been running
 the longest.
 
-```{r, echo = FALSE}
-# view one day from one source
+```{r}
 generation_train %>%
   group_by(source_key) %>%
   filter(date_time < make_date(2020, 05, 16)) %>%
@@ -571,7 +623,7 @@ However, we also see that one source drops to 0 output around 9:15 AM while the
 others only experience a dip.
 Sensor faults will have an impact on predictions.
 
-```{r, echo = FALSE}
+```{r}
 # view all average for all of month
 generation_train %>%
   group_by(date_time) %>%
@@ -582,7 +634,9 @@ generation_train %>%
        x = "Time", 
        y = "Average DC Power") +
   theme(legend.position = "none")
+```
 
+```{r}
 generation_train %>%
   group_by(source_key) %>%
   ggplot(aes(x = date_time, y = daily_yield, color = source_key)) +
@@ -591,7 +645,6 @@ generation_train %>%
   labs(title = "Daily Yield Over One Month",
        x = "Time",
        y = "Daily Yield")
-  
 ```
 The first graph above takes the average dc output of every sensor over the month.
 The result is predictably periodic, and peaks at roughly the same value every day.
@@ -601,7 +654,7 @@ This graph more clearly demonstrates the difference in DC output from day to day
 and that each solar power source outputs roughly the same amount every day.
 
 ### Weather
-```{r, echo = FALSE}
+```{r}
 # Ambient Temperature
 weather_train %>%
   select(irradiation, module_temperature, ambient_temperature) %>%
@@ -622,7 +675,7 @@ The existence of a cooling system suggests that the module has an ideal operatin
 temperature at which it most efficiently generates power.
 The box plot below visualizes the greater spread.
 
-```{r, echo = FALSE}
+```{r}
 weather_train %>%
   pivot_longer(cols = c(module_temperature, ambient_temperature), 
                names_pattern = "(.*)_",
@@ -636,14 +689,16 @@ weather_train %>%
        y = "Temperature")
 ```
 
-```{r, echo = FALSE}
+```{r}
 weather_train %>%
   ggplot(aes(irradiation)) +
   geom_histogram(bins = 25) +
   labs(title = "Irradiation Distribution",
        x = "Irradiation",
        y = "Count")
+```
 
+```{r}
 weather_train %>%
   filter(irradiation > 0) %>%
   ggplot(aes(irradiation)) +
@@ -668,14 +723,16 @@ of the sunlight approaches normal, or 90 degrees.
 Regardless, this graph reveals there is more to the irradiation reaching the solar
 panels than simple geometry.
 
-```{r, echo = FALSE}
+```{r}
 weather_train %>%
   ggplot(aes(x = date_time, y = irradiation, fill = plant_id)) +
   geom_line() +
   labs(title = "Irradiation Over Time",
        x = "Time",
        y = "Irradiation")
+```
 
+```{r}
 weather_train %>%
   ggplot(aes(x = date_time)) +
   geom_line(aes(y = module_temperature, color = "Module")) +
@@ -696,7 +753,7 @@ However, note that the ambient temperature actually lags behind the module
 temperature.
 The relationship between irradiation and temperatures will be further examined below.
 
-```{r, echo = FALSE}
+```{r}
 weather_train %>%
   mutate(date = round_date(date_time, unit = "day"),
          time = as_datetime(as_hms(date_time))) %>%
@@ -705,7 +762,9 @@ weather_train %>%
   labs(title = "Irradiation Over a Day",
        x = "Time",
        y = "Irradiation")
+```
 
+```{r}
 weather_train %>%
   mutate(date = round_date(date_time, unit = "day"),
          time = as_datetime(as_hms(date_time))) %>%
@@ -714,7 +773,9 @@ weather_train %>%
   labs(title = "Module Temperature Over the Day",
        x = "Time",
        y = "Module Temperature (Celsius)")
+```
 
+```{r}
 weather_train %>%
   mutate(date = round_date(date_time, unit = "day"),
          time = as_datetime(as_hms(date_time))) %>%
@@ -730,7 +791,7 @@ the sun reaching the solar panel.
 The module temperature 
 Ambient: Trends DOWN from may to june
 
-```{r, echo = FALSE}
+```{r}
 weather_train %>%
   mutate(date = round_date(date_time, unit = "day"),
          time = as_datetime(as_hms(date_time))) %>%
@@ -757,7 +818,7 @@ This might suggest that the weather data can largely be described by the
 irradiation, or by the irradiation and the ambient temperature.
 
 ## Correlation
-```{r power_correlation}
+```{r}
 solar %>%
   na.omit() %>%
   select(dc_power, ac_power) %>%
@@ -774,9 +835,11 @@ fit <- solar %>%
 
 fit %>%
   tidy() %>%
-  kbl(caption = "AC Power per DC Power") %>%
+  kbl(caption="AC Power per DC Power") %>%
   kable_material()
+```
 
+```{r}
 solar %>%
   ggplot(aes(x = dc_power, y = ac_power, color = plant_id)) +
   geom_point(alpha = 0.25) +
@@ -801,7 +864,8 @@ module.
 
 For a better understanding of what may be going on with weather at the power
 plant, the values of the weather sensors are treated as time series.
-```{r irradiation_module_lag}
+
+```{r}
 weather_tsbl <- weather_train %>%
   as_tsibble(index = date_time) %>%
   fill_gaps()
@@ -813,12 +877,14 @@ weather_tsbl %>%
   labs(title = "Cross Correlation Between Irradiation and Module Temperature",
        x = "Lag",
        y = "Correlation")
+```
 
+```{r}
 weather_tsbl %>%
   CCF(y = module_temperature, x = irradiation, lag_max = 10) %>%
   slice_max(ccf) %>%
   rename(correlation = ccf) %>%
-  kbl(caption = "Lag of Maximum Cross Correlation Between Irradiation and Module Temperature") %>%
+  kbl(caption="Lag of Maximum Cross Correlation Between Irradiation and Module Temperature") %>%
   kable_material()
 ```
 A strong correlation is found between the irradiation and the module temperature
@@ -830,7 +896,7 @@ However, referring back to the average day temperatures graph, it appears that
 as the radiation increases, temperature increases in step.
 As the radiation decreases, the temperature decreases after about 30 minutes.
 
-```{r irradiation_ambient_lag}
+```{r}
 weather_tsbl %>%
   CCF(y = ambient_temperature, x = irradiation, lag_max = 10) %>%
   ggplot(aes(x = lag, y = ccf)) +
@@ -838,12 +904,14 @@ weather_tsbl %>%
   labs(title = "Cross Correlation Between Irradiation and Ambient Temperature",
        x = "Lag",
        y = "Correlation")
+```
 
+```{r}
 weather_tsbl %>%
   CCF(y = ambient_temperature, x = irradiation, lag_max = 48) %>%
   slice_max(ccf) %>%
   rename(correlation = ccf) %>%
-  kbl(caption = "Lag of Maximum Cross Correlation Between Irradiation and Ambient Temperature") %>%
+  kbl(caption="Lag of Maximum Cross Correlation Between Irradiation and Ambient Temperature") %>%
   kable_material()
 ```
 The connection between irradiation and ambient temperature is less clear. 
@@ -855,7 +923,7 @@ However, there are sufficient confounding and unobserved variables related to
 weather and weather prediction that it is beyond the scope of this analysis to dig
 deeper.
 
-```{r temperature_lags} 
+```{r} 
 weather_tsbl %>%
   CCF(y = ambient_temperature, x = module_temperature, lag_max = 10) %>%
   ggplot(aes(x = lag, y = ccf)) +
@@ -863,12 +931,14 @@ weather_tsbl %>%
   labs(title = "Cross Correlation Between Module Temperature and Ambient Temperature",
        x = "Lag",
        y = "Correlation")
+```
 
+```{r,}
 weather_tsbl %>%
   CCF(y = ambient_temperature, x = module_temperature, lag_max = 48) %>%
   slice_max(ccf) %>%
   rename(correlation = ccf) %>%
-  kbl(caption = "Lag of Maximum Cross Correlation Between Module Temperature and Ambient Temperature") %>%
+  kbl(caption="Lag of Maximum Cross Correlation Between Module Temperature and Ambient Temperature") %>%
   kable_material()
 ```
 
@@ -901,7 +971,7 @@ train_set <- solar %>%
 ```
 
 
-### Baseline (Naive RMSE)
+### Baseline (Naive RMSE) {#naive_rmse}
 As established, the RMSE is the metric by which success is measured.
 To get an understanding of how much the model is improving, the naive RMSE will
 be calculated as a baseline
@@ -920,7 +990,7 @@ That is substantial.
 Time to explore ways to reducing reduce it.
 
 
-### Generation Source Effect
+### Generation Source Effect {#generation_source_effect}
 To start, the effect of stratifying by generation source is examined.
 ```{r}
 average_source <- train_set %>%
@@ -933,32 +1003,26 @@ predicted_power <- average_source %>%
   + mu_hat
 
 average_by_source_RMSE <- RMSE(predicted_power, test_set$dc_power)
+result <- tibble(method = "Average by Source", 
+                 RMSE = average_by_source_RMSE,
+                 improvement = (naive_rmse - average_by_source_RMSE) / naive_rmse)
 results <- results %>%
-  add_row(method = "Average by Source", 
-          RMSE = average_by_source_RMSE,
-          improvement = (naive_rmse - average_by_source_RMSE) / naive_rmse)
-average_by_source_RMSE
+  add_row(result)
+```
+
+```{r}
+result %>%
+  kbl(caption = "Model Results") %>%
+  kable_material()
 ```
 A slight improvement, but only slight. About a quarter of a percent.
 
-### Irradiation Effect
+### Irradiation Effect {#irradiation_effect}
 In exploration, it was observed that irradiation and dc output were highly
 correlated.
 
 ```{r}
 fit <- lm(dc_power ~ irradiation, data = train_set)
-
-train_set %>%
-  ggplot(aes(irradiation, dc_power, color = plant_id)) +
-  geom_point(alpha = 0.1) +
-  geom_abline(slope = fit$coefficients[2],
-              intercept = fit$coefficients[1],
-              size = 1)
-```
-The above graph suggests a linear relationship fits rather well.
-How much can the RMSE be improved upon using a linear model, using only irradiation
-as a predictor?
-```{r}
 predicted_power <- predict(fit, newdata = test_set)
 
 irradiation_rmse <- RMSE(predicted_power, test_set$dc_power) # 583.1007
@@ -968,9 +1032,25 @@ results <- results %>%
           improvement = (naive_rmse - irradiation_rmse) / naive_rmse)
 irradiation_rmse
 ```
+
 44.4 is, unsurprisingly, a substatial improvement over the naive RMSE.
 
-### Module Temperature Effect
+```{r}
+train_set %>%
+  ggplot(aes(irradiation, dc_power, color = plant_id)) +
+  geom_point(alpha = 0.1) +
+  geom_abline(slope = fit$coefficients[2],
+              intercept = fit$coefficients[1],
+              size = 1)
+```
+
+The above graph suggests a linear relationship fits rather well.
+How much can the RMSE be improved upon using a linear model, using only irradiation
+as a predictor?
+
+
+
+### Module Temperature Effect {#module_temperature_effect}
 It is not unreasonable to consider other weather effects to construct the model.
 ```{r}
 train_set %>%
@@ -982,6 +1062,7 @@ train_set %>%
        x = "Module Temperature",
        y = "DC Power Residual")
 ```
+
 The above graph, relating module temperature and the DC power output, suggests 
 that the module has an optimal operating temperature between 20 and 54 degrees.
 The relationship does not appear to be a straight line, however.
@@ -991,7 +1072,6 @@ Perhaps the module temperature effect is best represented by parabola
 fit <- train_set %>%
   mutate(module_temperature_sq = module_temperature ^ 2) %>%
   lm(dc_power ~ irradiation + module_temperature + module_temperature_sq, data = .)
-
 
 predicted_power <- test_set %>%
   mutate(module_temperature_sq = module_temperature ^ 2) %>%
@@ -1006,6 +1086,7 @@ results <- results %>%
           improvement = (naive_rmse - irradiation_module_temperature_rmse) / naive_rmse)
 irradiation_module_temperature_rmse
 ```
+
 40.0, a %9.9 improvement over a purely irradiation effect.
 
 Earlier, it was discovered that module temperature lagged irradiation by 15 minutes
@@ -1013,6 +1094,7 @@ and was highly correlated.
 Can a similar RMSE be achieved by simply lagging the irradiation by 15 mintutes?
 Note, the lagged time series results in an NA.
 Since this is at night, it will be replaced with the lowest predicted dc_power.
+
 ```{r}
 fit <- train_set %>% 
   mutate(lag_irradiation = lag(irradiation, 1),
@@ -1032,11 +1114,14 @@ results <- results %>%
           improvement = (naive_rmse - irradiation_lag_rmse) / naive_rmse)
 irradiation_lag_rmse
 ```
+
 40.61, about %1 worse than if module temperature was incorporated.
 
-### Ambient Temperature Effect
+### Ambient Temperature Effect {#ambient_temperature_effect}
+
 Now, the residual DC power is compared to the ambient temperature.
-```{r, echo = FALSE}
+
+```{r}
 train_set %>%
   mutate(dc_power_resid = dc_power 
          - fit$coefficients[1] 
@@ -1050,6 +1135,7 @@ train_set %>%
        x = "Ambient Temperature",
        y = "DC Power Residual")
 ```
+
 This appears to show a negligible effect.
 
 ```{r}
@@ -1072,17 +1158,22 @@ results <- results %>%
           RMSE = irradiation_module_ambient_temperature_rmse,
           improvement = (naive_rmse - irradiation_module_ambient_temperature_rmse) / naive_rmse)
 ```
+
 An improvement of less than half of a percent.
 
-### Clamping and Sensor Faults
+### Clamping and Sensor Faults {#clamping_and_sensor_faults}
+
 Let's take a glance look at how our predictions compare to the test data.
-```{r, echo = FALSE}
+
+```{r}
 summary(predicted_power) %>%
   bind_rows(summary(test_set$dc_power)) %>%
   as_tibble() %>%
   add_column(.before = "Min.", DC_Power = c("Predicted", "Test Set")) %>%
-  kbl(caption = "Summary of Linear Fit Predictions")
+  kbl(caption="Summary of Linear Fit Predictions") %>%
+  kable_material()
 ```
+
 Immediately, a source of improvement presents itself.
 It is not possible for negative DC power to be produced.
 
@@ -1135,7 +1226,8 @@ A final RMSE of 39.15 is found with a model based on linear regression and some
 cleaning.
 39.15 is an improvement of 90.3% over the naive RMSE, a considerable improvement.
 
-### ARIMA
+### ARIMA {#arima}
+
 ARIMA stands for Auto-Regressive Integrated Moving Average.
 It is a statistical analysis model that uses time series data to predict trends.
 Autoregressive: Predicts future values based on past values, regresses on its own lagged values
@@ -1178,7 +1270,7 @@ results <- results %>%
 ```
 
 
-### ARIMA By Generation Source
+### ARIMA By Generation Source {#arima_by_generation_source}
 ```{r}
 ts_train_set <- train_set %>%
   mutate(module_temperature_sq = module_temperature ^ 2) %>%
@@ -1201,7 +1293,7 @@ results <- results %>%
 ```
 
 
-### Random Forest
+### Random Forest {#random_forest}
 ```{r, eval = FALSE}
 train_set_wide <- train_set %>%
   mutate(day = as.numeric(round_date(date_time, unit = "day") - make_datetime(2020, 05, 15)),
@@ -1229,7 +1321,7 @@ fit <- randomForest(dc_power ~ .,
 ```
 
 
-### PCA
+### PCA {#pca}
 Principle Component Analysis
 ```{r, eval = FALSE}
 result <- prcomp(train_set_wide, scale = TRUE)
@@ -1256,7 +1348,7 @@ qplot(c(1:6), RMSEs) +
 RMSEs
 ```
 
-# Results
+# Results {#results}
 ```{r}
 results %>%
   kbl() %>%
@@ -1264,11 +1356,11 @@ results %>%
 ```
 
 
-## Model Root Mean Squared Errors
+## Model Root Mean Squared Errors {#RMSES}
 
 
-## Final Validation
+## Final Validation {#final_validation}
 
 
-# Conclusion
+# Conclusion {#conclusion}
 
