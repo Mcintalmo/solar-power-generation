@@ -2,7 +2,9 @@
 title: "solar-plant-power-generation"
 author: "Alexander McIntosh"
 date: "7/15/2022"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -12,21 +14,22 @@ knitr::opts_chunk$set(
   warning = FALSE,
   tidy = TRUE,
   cahe = TRUE, # Set to FALSE to conserve memory
-  eval = FALSE # Set to TRUE for code to actually rune
+  eval = TRUE # Set to TRUE for code to actually rune
 )
+options(digits = 3)
 ```
 
 # Introduction
 
 As the unintended consequences of traditional energy collection become untenable,
 the world is turning to alternative, renewable energy sources.
-Solar power has become particularly popular for a host of reasons.
-However, a notable drawback of solar power is its lack of consistency.
-Inconsistency is a significant challenge for interacting with an external power grid.
+Solar power has become a particularly popular method of energy extraction.
+However, a notable drawback of solar power is its lack of day-to-day consistency.
+Inconsistency is a significant challenge for interfacing with an external power grid.
 
 In the analysis to follow, using only the data collected at the solar power plant,
-the power output of the plant will be predicted based only on data the plant
-has available.
+the power output of the plant will be predicted based only on data available to
+the plant.
 First, suspicious data are examined for usability.
 Then, the clean data are explored for patterns, correlation, and causality. 
 Finally, four models are engineered using linear regression, ARIMA, random forest
@@ -36,8 +39,8 @@ days worth of data, separated before the models' construction.
 
 For brevity and readability, many of the transformations used on the data to 
 produce graphs are not included in this report.
-For more information about how the graphs and results were generated for this
-report, see <http://www.github.com/mcintalmo/solar-plant-power-generation> . 
+For more information about how the graphs and results were generated,
+see <http://www.github.com/mcintalmo/solar-plant-power-generation> . 
 The link includes the R Markdown that generated this report and the 
 notebook used for exploration.
 
@@ -54,65 +57,58 @@ kaggle datasets download -d anikannal/solar-power-generation-data
 This analysis was conducted entirely within R. 
 Packages included tidyverse and broom for data organization and transformation.
 Lubridate and hms allowed for time stamp transformation.
-Forecast, fable, and feasts provided the backbone of analysis of the data as a 
+Tsibble, forecast, fable, and feasts provided the backbone of analysis of the data as a 
 time series and use of the ARIMA model.
 Ranger, randomForest, pls, and caret all contributed functions for developing
 a machine learning model.
+kableExtra was used only in this report to generate more visually appealing tables.
 
 ```{r packages, echo = FALSE}
 library(tidyverse)
 library(broom)
 library(lubridate)
 library(hms)
-library(forecast)
 library(tsibble)
+library(forecast)
 library(feasts)
 library(fable) # Requires installing "feasts" package
 library(ranger)
 library(randomForest)
 library(pls)
 library(caret)
+library(kableExtra)
 ```
 ## Data Collection
 The data for this analysis was collected by two solar plants in India.
-
 The first plant, id: 4135001, is near Gandikotta, Andhra and the second plant,
 id: 4136001, is near Nasik, Maharashtra.
-
 The data were collected at 15 minute intervals for 34 days.
-
 22 inverter sensors and one weather sensor at each plant brought the total to 46
 sensors collecting data. 
 
 
 The inverter sensors collected the DC and AC output of the group of solar panels
 it was monitoring.
-
 Additionally, the inverters tallied the daily yield in DC output from
 midnight to midnight and maintained the total yield the sensor had observed.
-
 Total yield increased until a sensor was replaced, at which point it would begin
 again at 0.
 
 
 The weather sensors recorded the ambient temperature, the temperature of the
 module, and the irradiation level.
-
 Owing to the sensors' reading of 0 at night, it is assumed any irradiation is
 owed entirely to the sun's radiation.
 
 ## Data Cleaning
 
 ### The Raw Data
-The data are spread out over four comma separated files, two power generation 
+The data are spread out over four comma separated files; two power generation 
 files and two weather sensor files, one each for each plant. 
-
-First, they are read into memory, using lubridate to parse the time stamp,
+First, the data are read into memory, using lubridate to parse the time stamp,
 coercing the plant_id to a character, and renaming variables for usability. 
-
 Note, one of the power generation files has a different date format than the 
 other three files. 
-
 This suggests human input or conversion was involved in the collection of
 the data.
 
@@ -166,7 +162,17 @@ generation <-
   bind_rows(parse_generation_data("Plant_2_Generation_Data.csv", "ymd HMS"))
 
 dim(generation)
-knitr::kable(head(generation))
+head(generation) %>%
+  kbl() %>%
+  kable_material()
+generation %>%
+  select(plant_id, source_key) %>%
+  group_by(source_key) %>%
+  slice(1) %>%
+  pivot_wider(names_from = "plant_id", values_from = "source_key") %>%
+  unnest() %>%
+  kbl() %>%
+  kable_material()
 ```
 The generation data consist of 136476 observations of 7 variables: The time stamp,
 the plant id number, the inverter key, the measured DC power from the panels, 
@@ -177,15 +183,23 @@ weather <- parse_weather_data("Plant_1_Weather_Sensor_Data.csv") %>%
   bind_rows(parse_weather_data("Plant_2_Weather_Sensor_Data.csv"))
 
 dim(weather)
-knitr::kable(head(weather))
+head(weather) %>% 
+  kbl() %>%
+  kable_material()
+weather %>%
+  select(plant_id, source_key) %>%
+  group_by(source_key) %>%
+  slice(1) %>%
+  pivot_wider(names_from = "plant_id", values_from = "source_key") %>%
+  unnest() %>%
+  kbl() %>%
+  kable_material()
 ```
 The weather data consist of only 6441 observations of 6 variables: The time stamp
 of the observations at 15 minute intervals, the plant id at which the observation
 was taken, the weather sensor key (identical accross the plant), the ambient
 temperature in Celsius, the module temperature in Celsius, and the irradiation.
-
 The difference in the number of observations owes to the number of sensors.
-
 Each plant has 22 units recording power generation data, and 1 sensor recording
 weather data.
 ```{r, echo = FALSE}
@@ -201,8 +215,8 @@ generation %>%
             max_dc = max(dc_power),
             median_dc = median(dc_power),
             mean_dc = mean(dc_power)) %>%
-  knitr::kable(format = "html",
-               caption = "DC Power Summary by Plant")
+  kbl(caption = "DC Ppower Summary by Plant") %>%
+  kable_material()
 
 generation %>%
   group_by(plant_id) %>%
@@ -280,7 +294,9 @@ join_generation_weather <- function(generation_data, weather_data) {
 }
 
 solar <- join_generation_weather(generation, weather)
-head(solar)
+head(solar) %>%
+  kbl() %>%
+  kable_material()
 dim(solar)
 ```
 143616 observations of 11 distinct variables, all times are now accounted for.
@@ -460,14 +476,15 @@ A validation set has been partitioned.
 Before models could be constructed, the data must be further explored to identify
 patterns.
 ### Generation
-```{r, echo = FALSe}
+```{r, echo = FALSE}
 generation_train %>%
   select(dc_power, ac_power, daily_yield) %>%
   summarize_all(list(min = min, max = max, median = median, mean = mean, sd = sd)) %>%
   pivot_longer(cols = everything(),
                names_pattern = "(.*)_(.*)",
                names_to = c("Variable", ".value")) %>%
-  knitr::kable(caption = "Summary of Power Generation Data")
+  kbl(caption = "Summary of Power Generation Data") %>%
+  kable_material()
 
 generation_train %>%
   group_by(source_key) %>%
@@ -592,7 +609,8 @@ weather_train %>%
   pivot_longer(cols = everything(),
                names_pattern = "(.*)_(.*)",
                names_to = c("Variable", ".value")) %>%
-  knitr::kable(caption = "Summary of Weather Sensor Data")
+  kbl(caption = "Summary of Weather Sensor Data") %>%
+  kable_material()
 ```
 It is not surprising that the module and ambient temperature have roughly the same
 median temperature, 24.7 degrees celsius. However, the module temperature shows
@@ -729,6 +747,8 @@ weather_train %>%
        y = "Temperature") +
   guides(color = guide_legend(title = "Average"))
 ```
+Note that in the graph above, the scale of the irradiation has been multiplied 
+by 40 and shifted up 20 degrees to better visualize relationships.
 Irradiation leads module temperature by about 15 minutes and ambient temperature
 by a number of hours.
 However, the module temperature appears to be some composition of the ambient
@@ -754,7 +774,8 @@ fit <- solar %>%
 
 fit %>%
   tidy() %>%
-  knitr::kable()
+  kbl(caption = "AC Power per DC Power") %>%
+  kable_material()
 
 solar %>%
   ggplot(aes(x = dc_power, y = ac_power, color = plant_id)) +
@@ -768,7 +789,7 @@ This fit suggests a 97.7% conversion rate from DC to AC power, only 2.3% is lost
 This suggests that the plants are using high quality transformers.
 
 ### Lag
-While exploring the weather data, a lag was noted between irradidation, module
+While exploring the weather data, a lag was noted between irradiation, module
 temperature, and ambient temperature.
 This could represent some relationship between the three.
 Because of the physical properties of temperature and heat flow, it is likely
@@ -795,35 +816,82 @@ weather_tsbl %>%
 
 weather_tsbl %>%
   CCF(y = module_temperature, x = irradiation, lag_max = 10) %>%
-  slice_max(ccf)
+  slice_max(ccf) %>%
+  rename(correlation = ccf) %>%
+  kbl(caption = "Lag of Maximum Cross Correlation Between Irradiation and Module Temperature") %>%
+  kable_material()
 ```
+A strong correlation is found between the irradiation and the module temperature
+after a 15 minute lag.
+This can be explained by the radiation heat transfer as a result of the 
+electromagnetic radiation of the sun.
+It does not take long for higher irradiation to increase the temperature of the module.
+However, referring back to the average day temperatures graph, it appears that
+as the radiation increases, temperature increases in step.
+As the radiation decreases, the temperature decreases after about 30 minutes.
 
 ```{r irradiation_ambient_lag}
 weather_tsbl %>%
   CCF(y = ambient_temperature, x = irradiation, lag_max = 10) %>%
-  autoplot()
+  ggplot(aes(x = lag, y = ccf)) +
+  geom_point() +
+  labs(title = "Cross Correlation Between Irradiation and Ambient Temperature",
+       x = "Lag",
+       y = "Correlation")
 
 weather_tsbl %>%
   CCF(y = ambient_temperature, x = irradiation, lag_max = 48) %>%
-  slice_max(ccf)
+  slice_max(ccf) %>%
+  rename(correlation = ccf) %>%
+  kbl(caption = "Lag of Maximum Cross Correlation Between Irradiation and Ambient Temperature") %>%
+  kable_material()
 ```
+The connection between irradiation and ambient temperature is less clear. 
+The correlation of 0.877 after an hour and fifteen minutes suggested that
+irradiation has some effect on the ambient temperature.
+The increased lag time has to do with how much less interaction there is between
+rays from the sun and air molecules vs a stationary module.
+However, there are sufficient confounding and unobserved variables related to 
+weather and weather prediction that it is beyond the scope of this analysis to dig
+deeper.
 
 ```{r temperature_lags} 
 weather_tsbl %>%
   CCF(y = ambient_temperature, x = module_temperature, lag_max = 10) %>%
-  autoplot()
+  ggplot(aes(x = lag, y = ccf)) +
+  geom_point() +
+  labs(title = "Cross Correlation Between Module Temperature and Ambient Temperature",
+       x = "Lag",
+       y = "Correlation")
 
 weather_tsbl %>%
   CCF(y = ambient_temperature, x = module_temperature, lag_max = 48) %>%
-  slice_max(ccf)
+  slice_max(ccf) %>%
+  rename(correlation = ccf) %>%
+  kbl(caption = "Lag of Maximum Cross Correlation Between Module Temperature and Ambient Temperature") %>%
+  kable_material()
 ```
 
+Interestingly, the ambient temperature lags the module temperature.
+At first glance, this does not make much sense.
+It is unlikely that a module can be driving the ambient temperature.
+
+However, if one keeps in mind the confounding variable of weather, the relationship 
+between irradiation and module temperature explains this.
+It is far more likely that the ambient environment acts as a heat sink when the
+module becomes very hot.
+Though the physical interactions of heat transfer are modellable, they are
+outside the scope of this analysis.
 
 
 ## The Model
 
-
 ### Splitting the Train and Test Sets
+A validation data set has already been separated from the data.
+However, to evaluate the efficacy of the model as it is constructed, it becomes
+necessary to further partition the data to avoid over training.
+The final two days of the solar data will be put into a test set, all other data
+remain in a train set.
 ```{r}
 test_set <- solar %>%
   filter(date_time > make_date(2020, 06, 12))
@@ -834,14 +902,26 @@ train_set <- solar %>%
 
 
 ### Baseline (Naive RMSE)
+As established, the RMSE is the metric by which success is measured.
+To get an understanding of how much the model is improving, the naive RMSE will
+be calculated as a baseline
+That is, the predicted dc_power will simply be the mean of all dc_power observed.
+
 ```{r}
 mu_hat <- mean(train_set$dc_power, na.rm = TRUE) # 321.0874
 naive_rmse <- RMSE(mu_hat, test_set$dc_power) # 401.8058
-results <- tibble(method = "Average", RMSE = naive_rmse)
+results <- tibble(method = "Average", RMSE = naive_rmse, improvement = 0)
+mu_hat
+naive_rmse
 ```
+The average of the dc_power over the entire data set is 321.
+Predicting the average dc_power results in an RMSE of 402.
+That is substantial.
+Time to explore ways to reducing reduce it.
 
 
 ### Generation Source Effect
+To start, the effect of stratifying by generation source is examined.
 ```{r}
 average_source <- train_set %>%
   group_by(generation_source) %>%
@@ -849,15 +929,22 @@ average_source <- train_set %>%
 
 predicted_power <- average_source %>%
   right_join(test_set) %>%
-  pull(avg_dc_power)
-predicted_power <- predicted_power + mu_hat
+  pull(avg_dc_power) %>%
+  + mu_hat
 
-average_source_RMSE <- RMSE(predicted_power, test_set$dc_power)
-results <- tibble(method = "Average by Source", RMSE = average_source_RMSE)
+average_by_source_RMSE <- RMSE(predicted_power, test_set$dc_power)
+results <- results %>%
+  add_row(method = "Average by Source", 
+          RMSE = average_by_source_RMSE,
+          improvement = (naive_rmse - average_by_source_RMSE) / naive_rmse)
+average_by_source_RMSE
 ```
-
+A slight improvement, but only slight. About a quarter of a percent.
 
 ### Irradiation Effect
+In exploration, it was observed that irradiation and dc output were highly
+correlated.
+
 ```{r}
 fit <- lm(dc_power ~ irradiation, data = train_set)
 
@@ -867,16 +954,24 @@ train_set %>%
   geom_abline(slope = fit$coefficients[2],
               intercept = fit$coefficients[1],
               size = 1)
-  
+```
+The above graph suggests a linear relationship fits rather well.
+How much can the RMSE be improved upon using a linear model, using only irradiation
+as a predictor?
+```{r}
 predicted_power <- predict(fit, newdata = test_set)
 
 irradiation_rmse <- RMSE(predicted_power, test_set$dc_power) # 583.1007
 results <- results %>%
-  add_row(method = "Irradiation Effect", RMSE = irradiation_rmse)
+  add_row(method = "Irradiation Effect", 
+          RMSE = irradiation_rmse,
+          improvement = (naive_rmse - irradiation_rmse) / naive_rmse)
+irradiation_rmse
 ```
-
+44.4 is, unsurprisingly, a substatial improvement over the naive RMSE.
 
 ### Module Temperature Effect
+It is not unreasonable to consider other weather effects to construct the model.
 ```{r}
 train_set %>%
   mutate(dc_power_resid = dc_power - irradiation * fit$coefficients[2] - fit$coefficients[1]) %>%
@@ -887,13 +982,16 @@ train_set %>%
        x = "Module Temperature",
        y = "DC Power Residual")
 ```
-Suggests an optimal operating temperature between 20 and 54 degrees.
-Module temperature best represented by parabola
+The above graph, relating module temperature and the DC power output, suggests 
+that the module has an optimal operating temperature between 20 and 54 degrees.
+The relationship does not appear to be a straight line, however.
+Perhaps the module temperature effect is best represented by parabola
 
 ```{r}
 fit <- train_set %>%
   mutate(module_temperature_sq = module_temperature ^ 2) %>%
   lm(dc_power ~ irradiation + module_temperature + module_temperature_sq, data = .)
+
 
 predicted_power <- test_set %>%
   mutate(module_temperature_sq = module_temperature ^ 2) %>%
@@ -904,11 +1002,40 @@ irradiation_module_temperature_rmse <-
 
 results <- results %>%
   add_row(method = "Irradiation + Module Temperature Effect", 
-          RMSE = irradiation_module_temperature_rmse)
+          RMSE = irradiation_module_temperature_rmse,
+          improvement = (naive_rmse - irradiation_module_temperature_rmse) / naive_rmse)
+irradiation_module_temperature_rmse
 ```
+40.0, a %9.9 improvement over a purely irradiation effect.
 
+Earlier, it was discovered that module temperature lagged irradiation by 15 minutes
+and was highly correlated.
+Can a similar RMSE be achieved by simply lagging the irradiation by 15 mintutes?
+Note, the lagged time series results in an NA.
+Since this is at night, it will be replaced with the lowest predicted dc_power.
+```{r}
+fit <- train_set %>% 
+  mutate(lag_irradiation = lag(irradiation, 1),
+         lag_irradiation_sq = lag_irradiation ^2) %>%
+  lm(dc_power ~ irradiation + lag_irradiation + lag_irradiation_sq, data = .)
+
+predicted_power <- test_set %>%
+  mutate(lag_irradiation = lag(irradiation, 1),
+         lag_irradiation_sq = lag_irradiation ^2) %>%
+  predict(fit, newdata = .) %>%
+  replace_na(min(., na.rm = TRUE))
+
+irradiation_lag_rmse <- RMSE(predicted_power, test_set$dc_power)
+results <- results %>%
+  add_row(method = "Irradiation + Irradiation Lag Effect", 
+          RMSE = irradiation_lag_rmse,
+          improvement = (naive_rmse - irradiation_lag_rmse) / naive_rmse)
+irradiation_lag_rmse
+```
+40.61, about %1 worse than if module temperature was incorporated.
 
 ### Ambient Temperature Effect
+Now, the residual DC power is compared to the ambient temperature.
 ```{r, echo = FALSE}
 train_set %>%
   mutate(dc_power_resid = dc_power 
@@ -923,11 +1050,101 @@ train_set %>%
        x = "Ambient Temperature",
        y = "DC Power Residual")
 ```
-This shows a negligible effect.
+This appears to show a negligible effect.
 
+```{r}
+fit <- train_set %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  lm(dc_power ~ irradiation + 
+                 module_temperature + 
+                 module_temperature_sq +
+                 ambient_temperature, data = .)
+
+
+predicted_power <- test_set %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  predict(fit, newdata = .)
+
+irradiation_module_ambient_temperature_rmse <- 
+  RMSE(predicted_power, test_set$dc_power) # 39.86
+results <- results %>%
+  add_row(method = "Irradiation + Module + Ambient Temperature Effect", 
+          RMSE = irradiation_module_ambient_temperature_rmse,
+          improvement = (naive_rmse - irradiation_module_ambient_temperature_rmse) / naive_rmse)
+```
+An improvement of less than half of a percent.
+
+### Clamping and Sensor Faults
+Let's take a glance look at how our predictions compare to the test data.
+```{r, echo = FALSE}
+summary(predicted_power) %>%
+  bind_rows(summary(test_set$dc_power)) %>%
+  as_tibble() %>%
+  add_column(.before = "Min.", DC_Power = c("Predicted", "Test Set")) %>%
+  kbl(caption = "Summary of Linear Fit Predictions")
+```
+Immediately, a source of improvement presents itself.
+It is not possible for negative DC power to be produced.
+
+```{r}
+predicted_power <- test_set %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  mutate(pred = predict(fit, newdata = .)) %>%
+  mutate(pred = ifelse(pred < 0, 0, pred))
+  
+
+clamped_rmse <- 
+  RMSE(predicted_power$pred, test_set$dc_power)
+results <- results %>%
+  add_row(method = "Clamped", 
+          RMSE = clamped_rmse,
+          improvement = (naive_rmse - clamped_rmse) / naive_rmse)
+clamped_rmse # 39.65
+```
+
+Other intuitive improvements may be made.
+For example, consider the anomalous data found during exploratory analysis.
+Do we improve the predictive model if we do not train anamolous data?
+
+```{r}
+fit <- train_set %>%
+  filter(irradiation > 0 & dc_power > 0) %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  lm(dc_power ~ irradiation + 
+                 module_temperature + 
+                 module_temperature_sq +
+                 ambient_temperature, data = .)
+
+predicted_power <- test_set %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  mutate(pred = predict(fit, newdata = .)) %>%
+  mutate(pred = ifelse(pred < 0 | irradiation == 0, 0, pred)) %>%
+  pull(pred)
+  
+
+clamped_fixed_rmse <- 
+  RMSE(predicted_power, test_set$dc_power)
+results <- results %>%
+  add_row(method = "Clamped + Anomolies Removed", 
+          RMSE = clamped_fixed_rmse,
+          improvement = (naive_rmse - clamped_fixed_rmse) / naive_rmse)
+clamped_fixed_rmse # 39.15
+```
+
+A final RMSE of 39.15 is found with a model based on linear regression and some
+cleaning.
+39.15 is an improvement of 90.3% over the naive RMSE, a considerable improvement.
 
 ### ARIMA
-Auto-Regressive Integrated Moving Average
+ARIMA stands for Auto-Regressive Integrated Moving Average.
+It is a statistical analysis model that uses time series data to predict trends.
+Autoregressive: Predicts future values based on past values, regresses on its own lagged values
+Integrated: Differences raw observations to make the time series stationary
+Moving Average: Smooths out time series data by creating a subset of recent data to use as an average
+auto.arima (from forecast) and ARIMA (from fable) automatically determine the p, q, and d parameters,
+that is, the parameters used in the autoregression, integration, and the moving average.
+
+
 ```{r}
 test_date_times <- test_set %>%
   pull(date_time) %>%
@@ -980,12 +1197,12 @@ predicted_power <- forecast(arima_models, new_data = ts_test_set) %>%
 
 arima_source_rmse <- RMSE(predicted_power, test_set$dc_power)
 results <- results %>%
-  add_row(method = "ARIMA by Source", RMSE = arima_source_RMSE)
+  add_row(method = "ARIMA by Source", RMSE = arima_source_rmse)
 ```
 
 
 ### Random Forest
-```{r}
+```{r, eval = FALSE}
 train_set_wide <- train_set %>%
   mutate(day = as.numeric(round_date(date_time, unit = "day") - make_datetime(2020, 05, 15)),
          hour = as.numeric(hour(date_time)),
@@ -1014,7 +1231,7 @@ fit <- randomForest(dc_power ~ .,
 
 ### PCA
 Principle Component Analysis
-```{r}
+```{r, eval = FALSE}
 result <- prcomp(train_set_wide, scale = TRUE)
 result$rotation <- -1 * result$rotation
 result$rotation
@@ -1029,7 +1246,7 @@ fit <- pcr(dc_power ~ ., data = train_set_wide, scale = TRUE, validation = "CV")
 summary(fit)
 ```
 
-```{r}
+```{r, eval = FALSE}
 RMSEs <- sapply(c(1:6), function(n_comp){
   predicted_power<- predict(fit, test_set_wide, ncomp = n_comp)
   RMSE(predicted_power, test_set$dc_power)
@@ -1039,9 +1256,12 @@ qplot(c(1:6), RMSEs) +
 RMSEs
 ```
 
-### Clamping and Sensor Faults
-
 # Results
+```{r}
+results %>%
+  kbl() %>%
+  kable_material()
+```
 
 
 ## Model Root Mean Squared Errors
