@@ -1,14 +1,27 @@
+if(!require(tidyverse)) install.packages("tidyverse")
 library(tidyverse)
-library(lubridate)
-library(hms)
+if(!require(broom)) install.packages("broom")
 library(broom)
+if(!require(lubridate)) install.packages("lubridate")
+library(lubridate)
+if(!require(hms)) install.packages("hms")
+library(hms)
+if(!require(tsibble)) install.packages("tsibble")
+library(tsibble)
+if(!require(forecast)) install.packages("forecast")
 library(forecast)
-library(fable) # Requires installing "feasts" package
+if(!require(feasts)) install.packages("feasts")
+library(feasts)
+if(!require(fable)) install.packages("fable")
+library(fable)
+if(!require(ranger)) install.packages("ranger")
 library(ranger)
+if(!require(randomForest)) install.packages("randomForest")
 library(randomForest)
-library(pls)
+if(!require(caret)) install.packages("caret")
 library(caret)
-
+if(!require(kableExtra)) install.packages("kableExtra")
+library(kableExtra)
 
 ###QUESTIONS TO POSSIBLE ASK:
 # *** Can we predict the power generation for next couple of days? - this allows for better grid management

@@ -69,17 +69,29 @@ kableExtra and bookdown were used only in the report to generate more aesthetica
 appealing tables and visualizations.
 
 ```{r packages}
+if(!require(tidyverse)) install.packages("tidyverse")
 library(tidyverse)
+if(!require(broom)) install.packages("broom")
 library(broom)
+if(!require(lubridate)) install.packages("lubridate")
 library(lubridate)
+if(!require(hms)) install.packages("hms")
 library(hms)
+if(!require(tsibble)) install.packages("tsibble")
 library(tsibble)
+if(!require(forecast)) install.packages("forecast")
 library(forecast)
+if(!require(feasts)) install.packages("feasts")
 library(feasts)
-library(fable) # Requires installing "feasts" package
+if(!require(fable)) install.packages("fable")
+library(fable)
+if(!require(ranger)) install.packages("ranger")
 library(ranger)
+if(!require(randomForest)) install.packages("randomForest")
 library(randomForest)
+if(!require(caret)) install.packages("caret")
 library(caret)
+if(!require(kableExtra)) install.packages("kableExtra")
 library(kableExtra)
 ```
 ## Data Collection {#data_collection}
