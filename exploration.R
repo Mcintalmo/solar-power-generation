@@ -208,18 +208,17 @@ generation %>%
 
 # Before moving forward, a quick function will be written to relate the
 #  generation and weather data, as that will be common.
-join_generation_weather <- function(generation_data, weather_data){
+join_generation_weather <- function(generation_data, weather_data) {
   generation_data %>%
     group_by(plant_id) %>%
     expand(date_time = full_seq(date_time, as.numeric(minutes(15))), # include a time stamp for every generation source for every 15 minutes
            generation_source = source_key) %>% # rename necessary since weather also has a source_key
     ungroup() %>%
-    left_join(generation_data, by = c("date_time", 
-                                 "plant_id", 
-                                 "generation_source" = "source_key")) %>%
-    mutate(dc_power = ifelse(plant_id == "4135001", dc_power / 10, dc_power)) %>% # Unit conversion error
-    full_join(weather_data, by = c("date_time", "plant_id")) %>%
-    rename(weather_source = source_key)
+    left_join(generation_data, by = c("date_time", # Add in rows that have been observed
+                                      "plant_id", 
+                                      "generation_source" = "source_key")) %>% # Rename duplicated variable name
+    full_join(weather_data, by = c("date_time", "plant_id")) %>% # Add weather data
+    rename(weather_source = source_key) # Rename duplicated variable name
 }
 
 solar <- join_generation_weather(generation, weather)

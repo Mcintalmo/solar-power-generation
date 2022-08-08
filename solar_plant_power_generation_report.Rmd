@@ -1,7 +1,7 @@
 ---
 title: "Predicting Solar Power Generation"
 author: "Alexander McIntosh"
-date: "7/15/2022"
+date: "08/08/2022"
 output:
   bookdown::pdf_document2
 figsintext : yes
@@ -32,15 +32,16 @@ the power output of the plant will be predicted based only on data available to
 the plant.
 First, suspicious data are examined for usability.
 Then, the clean data are explored for patterns, correlation, and causality. 
-Finally, four models are engineered using linear regression, ARIMA, random forest
-machine learning, and dimension reduction through principle component analysis.
-The success of each model is measured by the model's ability to predict three
+Finally, four models are engineered using linear regression, ARIMA, and 
+random forest machine learning.
+The success of each model was measured by the model's ability to predict three
 days worth of data, separated before the models' construction.
+The metric for success was the Root Mean Squared Error, or RMSE.
+The lower an RMSE value, the better the predictive capabilites of the model.
 
-For brevity and readability, many of the transformations used on the data to 
-produce graphs are not included in this report.
-For more information about how the graphs and results were generated,
-see 
+For brevity and readability, much of the code and many of the data 
+transformations used on the data to produce graphs are not included in this report.
+For more information about how the graphs and results were generated, see 
 <https://www.github.com/mcintalmo/solar-plant-power-generation>. 
 The link includes the R Markdown that generated this report and the 
 notebook used for exploration.
@@ -62,9 +63,9 @@ Packages included tidyverse and broom for data organization and transformation.
 Lubridate and hms allowed for time stamp transformation.
 Tsibble, forecast, fable, and feasts provided the backbone of analysis of the data as a 
 time series and use of the ARIMA model.
-Ranger, randomForest, pls, and caret all contributed functions for developing
+Ranger, randomForest, and caret all contributed functions for developing
 a machine learning model.
-kableExtra and bookdown were used only in the report to generate more visually 
+kableExtra and bookdown were used only in the report to generate more aesthetically 
 appealing tables and visualizations.
 
 ```{r packages}
@@ -78,7 +79,6 @@ library(feasts)
 library(fable) # Requires installing "feasts" package
 library(ranger)
 library(randomForest)
-library(pls)
 library(caret)
 library(kableExtra)
 ```
@@ -238,7 +238,7 @@ weather %>%
 
 The weather data consist of only 6441 observations of 6 variables: The time stamp
 of the observations at 15 minute intervals, the plant id at which the observation
-was taken, the weather sensor key (identical accross the plant), the ambient
+was taken, the weather sensor key (identical across the plant), the ambient
 temperature in Celsius, the module temperature in Celsius, and the irradiation.
 The difference in the number of observations owes to the number of sensors.
 Each plant has only 1 sensor recording weather data, shown in 
@@ -363,7 +363,7 @@ solar %>%
   ggplot(aes(x = date_time, fill = plant_id, color = plant_id)) +
   geom_bar() +
   xlim(range(generation$date_time)) +
-  labs(x = "Time",
+  labs(x = "Date and Time",
        y = "Number of Missing Observations",
        fill = "Plant ID",
        color = "Plant ID")
@@ -383,7 +383,7 @@ solar %>%
   ggplot(aes(x = date_time, fill = plant_id, color = plant_id)) +
   geom_bar() +
   xlim(range(weather$date_time)) +
-  labs(x = "Time",
+  labs(x = "Date and Time",
        y = "Number of Missing Observations",
        fill = "Plant ID",
        color = "Plant ID")
@@ -394,19 +394,19 @@ Note that  many of the missing values of one or both weather sensors align with
 missing values of the generation sensors as well.
 This might suggest maintenance or a failure of a kind that affected the entire plant.
 
-```{r sensor-anamolies, fig.cap = "Sensor Aanomalies Over Time"}
+```{r sensor-anomalies, fig.cap = "Sensor Aanomalies Over Time"}
 solar %>%
   na.omit() %>%
   filter((dc_power == 0 & irradiation > 0)) %>%
   ggplot(aes(x = date_time, fill = plant_id, color = plant_id)) +
   geom_bar() +
-  labs(x = "Time", 
+  labs(x = "Date and Time", 
        y = "Anamoly Count",
        fill = "Plant ID",
        color = "Plant ID")
 ```
 
-Figure \@ref(fig:sensor-anamolies) displays anomalies in the sensor data.
+Figure \@ref(fig:sensor-anomalies) displays anomalies in the sensor data.
 Here, an anomaly is defined as an observation in which the irradiation measured
 by the weather sensor is greater than 0, but no DC power is generated.
 This is incredibly unlikely to happen in a functioning solar cell.
@@ -485,7 +485,7 @@ solar %>%
   summarize(na_rate = sum(is_na), likely_na_rate = sum(likely_na)) %>%
   ggplot(aes(x = na_rate, y = likely_na_rate, color = plant_id)) +
   geom_point() +
-  labs(x = "NA Count",
+  labs(x = "Missing Observation Count",
        y = "Anamoly County",
        color = "Plant ID")
 ```
@@ -512,7 +512,7 @@ solar %>%
   ggplot(aes(x = date_time, y = total_yield, color = generation_source)) +
   geom_line(alpha = 0.25) +
   theme(legend.position = "none") +
-  labs(x = "Time",
+  labs(x = "Date and Time",
        y = "Total Yield", 
        color = "Power Generaton Source")
 ```
@@ -528,7 +528,7 @@ solar %>%
   ggplot(aes(x = date_time, y = total_yield, color = generation_source)) +
   geom_line(alpha = 0.25) +
   theme(legend.position = "none") +
-  labs(x = "Time",
+  labs(x = "Date and Time",
        y = "Total Yield", 
        color = "Power Generation Source")
 ```
@@ -684,7 +684,7 @@ generation_train %>%
   group_by(source_key) %>%
   filter(date_time < make_date(2020, 05, 16)) %>%
   ggplot(aes(x = date_time)) +
-  geom_line(aes(y = dc_power, color = source_key), alpha = 0.5) +
+  geom_line(aes(y = dc_power, color = source_key), alpha = 0.75) +
   labs(x = "Time",
        y = "DC Power") +
   theme(legend.position = "none")
@@ -713,14 +713,14 @@ generation_train %>%
   summarize(avg_dc_power = mean(dc_power)) %>%
   ggplot(aes(x = date_time, y = avg_dc_power)) +
   geom_line() +
-  labs(x = "Time", 
+  labs(x = "Date and Time", 
        y = "Average DC Power") +
   theme(legend.position = "none")
 ```
 
 Figure \@ref(fig:average-dc-power-month) shows the average DC power from each power
 generation source for the entire month.
-The result is predictably perdiodic, peaking at about 1:15 PM each day.
+The result is predictably periodic, peaking at about 1:15 PM each day.
 Any trends up or down are not evident upon visual examination.
 
 ```{r daily-yield-overlay, fig.cap = "Daily Yield Over One Month",}
@@ -729,7 +729,7 @@ generation_train %>%
   ggplot(aes(x = date_time, y = daily_yield, color = source_key)) +
   geom_line(alpha = 0.25) +
   theme(legend.position = "none") +
-  labs(x = "Time",
+  labs(x = "Date and Time",
        y = "Daily Yield")
 ```
 
@@ -816,13 +816,13 @@ panels than simple geometry.
 weather_train %>%
   ggplot(aes(x = date_time, y = irradiation, fill = plant_id)) +
   geom_line() +
-  labs(x = "Time",
+  labs(x = "Date and Time",
        y = "Irradiation")
 ```
 
 Figure \@ref(fig:irradiation-time-series) displays that irradiation over time
 follows a pattern that looks very similar to the 
-graph generated of dc power output over time.
+graph generated of DC power output over time.
 It is periodic, with a frequency of 1 day, peaking at approximately 1 PM.
 
 ```{r temp-time-series, fig.cap = "Temperature Over Time"}
@@ -830,7 +830,7 @@ weather_train %>%
   ggplot(aes(x = date_time)) +
   geom_line(aes(y = module_temperature, color = "Module")) +
   geom_line(aes(y = ambient_temperature, color = "Ambient")) +
-  labs(x = "Time",
+  labs(x = "Date and Time",
        y = "Temperature (Celsius)") +
   guides(color = guide_legend(title = "Sensor"))
 ```
@@ -915,10 +915,8 @@ irradiation, or by the irradiation and the ambient temperature.
 
 ## Correlation
 
-The relationship between the DC Power and AC Power is shown in table 
-\@ref(tab:ac-dc-correlation).
 
-```{r ac-dc-correlation}
+```{r ac-dc-tab, eval=FALSE}
 solar %>%
   na.omit() %>%
   select(dc_power, ac_power) %>%
@@ -929,7 +927,8 @@ solar %>%
   kable_material()
 ```
 
-DC and AC are highly correlated.
+The correlation between the DC Power and AC Power was found to be 1. 
+They are highly correlated.
 This aligns with expectations, that a certain percent of power is lost in
 during conversion.
 The loss can be determined by fitting the data to a line.
@@ -1068,7 +1067,7 @@ Though the physical interactions of heat transfer might be modeled, they are
 outside the scope of this analysis.
 
 
-## Building The Model
+## Building The Linear Regression Model
 
 ### Splitting the Train and Test Sets
 
@@ -1089,12 +1088,16 @@ train_set <- solar %>%
 
 ### Baseline (Naive RMSE) {#naive_rmse}
 
-As established, the RMSE is the metric by which success is measured.
+The RMSE is the metric by which success is measured.
 To get an understanding of how much the model is improving, the naive RMSE will
-be calculated as a baseline
+be calculated as a baseline.
 That is, the predicted dc_power will simply be the mean of all dc_power observed.
 
 ```{r}
+RMSE <- function(predicted_power, test_power){
+  sqrt(mean((test_power - predicted_power) ^ 2, na.rm = TRUE))
+}
+
 mu_hat <- mean(train_set$dc_power, na.rm = TRUE) # 321.0874
 
 naive_rmse <- RMSE(mu_hat, test_set$dc_power) # 401.8058
@@ -1115,7 +1118,7 @@ Time to explore ways to reducing reduce it.
 ### Generation Source Effect {#generation_source_effect}
 
 To start, the effect of stratifying by generation source is examined. The results
-are shown in table \@ref{tab:average-by-source-model}.
+are shown in table \@ref(tab:average-by-source-model).
 
 ```{r}
 average_source <- train_set %>%
@@ -1145,11 +1148,11 @@ A slight improvement, but only slight. About a quarter of a percent.
 
 ### Irradiation Effect {#irradiation_effect}
 
-In exploration, it was observed that irradiation and dc output were highly
+In exploration, it was observed that irradiation and DC power output were highly
 correlated. 
-A linear regression method was used to predict dc output based purely on 
+A linear regression method was used to predict DC power output based purely on 
 irradiation, using the train set to predict against the test set.
-The result is shown in tabe \@ref{tab:irradiation-effect}
+The result is shown in table \@ref(tab:irradiation-effect).
 
 ```{r}
 fit <- lm(dc_power ~ irradiation, data = train_set)
@@ -1166,7 +1169,7 @@ results <- results %>%
 
 ```{r irradiation-effect}
 result %>%
-  kbl() %>%
+  kbl(caption = "Irradiation Effect") %>%
   kable_material()
 ```
 
@@ -1193,9 +1196,9 @@ as a predictor?
 ### Module Temperature Effect {#module_temperature_effect}
 
 It is not unreasonable to consider other weather effects to construct the model.
-We can get a better understanding of how temperature effects the dc output by
+We can get a better understanding of how temperature effects the DC power output by
 sweeping away the irradiation effect and plotting the resulting residual against
-the module temperature. The results are shown in figure \@ref{fig:mod-temp-eff}.
+the module temperature. The results are shown in figure \@ref(fig:mod-temp-eff).
 
 ```{r mod-temp-eff, fig.cap = "Module Temperature Effect"}
 train_set %>%
@@ -1215,7 +1218,7 @@ Perhaps the module temperature effect is best represented by parabola.
 To account for the parabolic shape of the data, a placeholder variable was added to the train
 and test sets that was simply the squared module temperature.
 Then, a fit was made based on irradiation, module temperature, and the module
-temperature squared. The results may be seen in table \@ref{tab:irr-mod-temp-tab}.
+temperature squared. The results may be seen in table \@ref(tab:irr-mod-temp-tab).
 
 ```{r}
 fit <- train_set %>%
@@ -1239,7 +1242,7 @@ results <- results %>%
 
 ```{r irr-mod-temp-tab}
 result %>%
-  kbl() %>%
+  kbl(caption = "Module Temperature Effect") %>%
   kable_material()
 ```
 
@@ -1289,7 +1292,7 @@ result %>%
 Now, the residual DC power is compared to the ambient temperature, similar to how
 module temperature was examined.
 The result of sweeping out the irradiation and module temperature squared effect
-are shown in figure \@ref{fig:amb-temp-eff}.
+are shown in figure \@ref(fig:amb-temp-eff).
 
 ```{r amb-temp-eff, fig.cap = "Ambient Temperature Effect"}
 train_set %>%
@@ -1332,18 +1335,18 @@ results <- results %>%
 
 ```{r amb-temp-eff-tab}
 result %>%
-  kbl() %>%
+  kbl(caption = "Ambient Temperature Effect") %>%
   kable_material()
 ```
 
-Table \@ref{tab:amb-temp-eff-tab} reinforces what was assumed from 
+Table \@ref(tab:amb-temp-eff-tab) reinforces what was assumed from 
 figure \@ref(fig:amb-temp-eff).
 Adding ambient temperature to the models results in an improvement of less than half of a percent.
 
 ### Clamping and Sensor Faults {#clamping_and_sensor_faults}
 
 Let's take a glance look at how our predictions compare to the test data.
-A summary is shown in \@ref{tab:predict-summary}.
+A summary is shown in \@ref(tab:predict-summary).
 
 ```{r predict-summary}
 summary(predicted_power) %>%
@@ -1359,7 +1362,7 @@ It is not physically possible for negative DC power to be produced.
 Negative DC Power would suggest that the solar panels are drawing energy in.
 To account for this impossibility, a clamped prediction increases any results DC Power that is
 less than 0 to 0.
-The results of clamping may be seen in tab \@ref(tab:clamped)
+The results of clamping may be seen in table \@ref(tab:clamp)
 
 ```{r}
 predicted_power <- test_set %>%
@@ -1378,9 +1381,9 @@ results <- results %>%
   add_row(result)
 ```
 
-```{r clamped}
+```{r clamp}
 result %>%
-  kbl() %>%
+  kbl(caption = "Clamping Effect") %>%
   kable_material()
 ```
 
@@ -1419,14 +1422,14 @@ result %>%
   kable_material()
 ```
 
-Table \@ref{tab: clamped-no-anomaly} shows the result of removing anomalies from
+Table \@ref(tab: clamped-no-anomaly) shows the result of removing anomalies from
 the training data and clamping the prediction.
 
 39.15 is a considerable improvement of 90.3% over the naive RMSE.
 The final clamped RMSE of 39.15 is an 11.8 % improvement on the uni-variate
-linear regression prediction based on irradiation. Figure \@ref{fig:lm-prediction}
+linear regression prediction based on irradiation. Figure \@ref(fig:lm-prediction)
 shows the final fit.
-The colored lins represent the observed DC output at teach plant.
+The colored lines represent the observed DC output at teach plant.
 The black line represents the final linear fit.
 
 ```{r lm-prediction, fig.cap = "Final Linear Prediction on Test Set"}
@@ -1435,12 +1438,12 @@ predicted_power %>%
   geom_line(aes(y = dc_power, color = generation_source), alpha = 0.25) +
   geom_line(aes(y = pred), size = 1) +
   theme(legend.position = "none") +
-  labs(x = "Time",
+  labs(x = "Date and Time",
        y = "DC Power")
 ```
 
 
-### ARIMA {#arima}
+## Building the ARIMA Model {#arima}
 
 ARIMA stands for **A**uto-**R**egressive **I**ntegrated **M**oving **A**verage.
 It is a statistical analysis model that uses time series data to predict trends.
@@ -1448,11 +1451,14 @@ Auto-Regressive: Predicts future values based on past values, regresses on its o
 Integrated: Differences raw observations to make the time series stationary
 Moving Average: Smooths out time series data by creating a subset of recent data to use as an average
 auto.arima (from forecast) and ARIMA (from fable) automatically determine the p, q, and d parameters,
-that is, the parameters used in the autoregression, integration, and the moving average.
+that is, the parameters used in the auto-regression, integration, and the moving average.
+
+
+### Averaged ARIMA
 
 Below is the result of running an auro.arima on the train set, after averaging
-the observed dc power from each power generation source.
-Figure \@ref{fig:arima-forecast} shows the predicted result for the test set days.
+the observed DC power from each power generation source.
+Figure \@ref(fig:arima-forecast) shows the predicted result for the test set days.
 
 
 ```{r}
@@ -1499,12 +1505,12 @@ results <- results %>%
 
 ```{r arima-tab}
 result %>%
-  kbl() %>%
+  kbl(caption = "ARIMA RMSE") %>%
   kable_material() # 179.0664
 ```
-Table \@ref{tab:arima-tab} shows the RMSE of the ARIMA model.
+Table \@ref(tab:arima-tab) shows the RMSE of the ARIMA model.
 An RMSE of 179 is much worse than the irradiation prediction, but it is important
-to keep in mind that this prediction was made using *only* dc power as a predictor.
+to keep in mind that this prediction was made using *only* DC power as a predictor.
 The fact that it improves so much over the average is impressive.
 
 ### ARIMA By Generation Source {#arima_by_generation_source}
@@ -1513,7 +1519,7 @@ It is possible through the use of tsibbles and the fable package to be more
 granular with ARIMA.
 In particular, it may be separated to apply only to each group.
 The previous ARIMA model used only the average dc.
-Table \@ref{tab:arima-by-source} shows the result of applying an ARIMA fit to each
+Table \@ref(tab:arima-by-source) shows the result of applying an ARIMA fit to each
 group.
 
 ```{r}
@@ -1533,9 +1539,11 @@ ts_test_set <- test_set %>%
 predicted_power <- forecast(arima_models, new_data = ts_test_set) %>%
   as_tibble() %>%
   select(generation_source, date_time, pred = .mean) %>%
+  mutate(pred = ifelse(pred < 0, 0, pred)) %>%
   left_join(ts_test_set, by = c("date_time", "generation_source"))
 
-arima_source_rmse <- RMSE(predicted_power$pred, test_set$dc_power)
+arima_source_rmse <- RMSE(predicted_power$pred, 
+                          predicted_power$dc_power)
 
 result <- tibble(method = "ARIMA by Source",
                  RMSE = arima_source_rmse)
@@ -1546,38 +1554,39 @@ results <- results %>%
 
 ```{r arima-by-source}
 result %>%
-  kbl() %>%
+  kbl(caption = "Result of Applying ARIMA to Each Generation Source") %>%
   kable_material()
 ```
-The large RMSE, 558, is even worse than the average.
-Interestingly, this suggests that the data was wildly over fitted when only going
-by source.
-The inidiviudalized-by-source fits are showsn in figure \@ref{fig:arima-pred}.
+Stratifying by generation source significantly reduced the RMSE of applying
+the ARIMA.
+This is an improvement on the uni-variate linear regression, but does not hold
+up to the multivariate models.
+Note that for this result, clamping predictions to be greater than 0 was applied.
+Clamping only reduced the RMSE by 0.3.
+The individualized-by-source fits are shown in figure \@ref(fig:arima-pred).
 
-The inherent smoothing of taking the average dc power improved the fit.
-When the averaging was removed, the fit deteriorated.
 While there exist methods to include external regressors to an ARIMA fit, those
 models will be left for future work.
 
 
 ```{r arima-pred, fig.cap = "Arima Prediction for Test Days", fig.height = 28, fig.width = 20}
 predicted_power %>%
-  group_by(generation_source) %>%
+  group_by(date_time) %>%
+  mutate(pred = mean(pred)) %>%
   ggplot(aes(x = date_time)) +
-  geom_point(aes(y = dc_power), alpha = 0.75) +
-  geom_line(aes(y = pred, color = generation_source), size = 1) +
-  facet_grid(generation_source ~ .) + 
+  geom_point(aes(y = dc_power, color = generation_source), alpha = 0.75) +
+  geom_line(aes(y = pred)) +
   theme(legend.position = "none") +
-  labs(x = "Time",
+  labs(x = "Date and Time",
        y = "DC Power")
 ```
 
 
-### Random Forest {#random_forest}
+## Building the Random Forest Model {#random_forest}
 
 First, a linear model was constructed out of the variables that the author
 could think to reasonably include.
-Then, an ARIMA model was applied to the dc power to get single dimensional results.
+Then, an ARIMA model was applied to the DC power to get single dimensional results.
 Now, the floor will be opened to all observed variables by using random forest
 to make predictions.
 
@@ -1589,7 +1598,7 @@ Additional variables are created out of squaring the irradiation, module
 temperature, and ambient temperature.
 
 AC power, daily yield, and total yield are all removed from prediction.
-Though their previously recorded values could be incorperated with lag, AC power,
+Though their previously recorded values could be incorporated with lag, AC power,
 daily yield, and total yield are all direct results of DC power, and do not make
 realistic predictors if this model were ever applied to future days.
 
@@ -1631,31 +1640,30 @@ fit_rf <- train(dc_power ~ .,
 Now, let us take a look at what the importance of various variables in building
 the model.
 The importance of each model, extracted with varImp, is shown in figure
-\@ref{fig:var-imp}.
-Figure \@ref{fig:var-imp} clearly shows that irradiation, irradiation squared,
+\@ref(fig:var-imp).
+Figure \@ref(fig:var-imp) clearly shows that irradiation, irradiation squared,
 module temperature, and module temperature squared dominate the predictions.
 This is in line with the previously constructed linear model.
 
-Interestingly, ambient temperature remains a relavent predictor.
-And despite the early assumption that the time of day help little importace,
+Interestingly, ambient temperature remains a relevant predictor.
+And despite the early assumption that the time of day help little importance,
 it still makes an appearance on.
 
-Day, minute, and generation source are all of negligable effect.
+Day, minute, and generation source are all of negligible effect.
 
 
-```{r var-imp}
+```{r var-imp, fig.cap = "Importance of Features in Random Forest"}
 ggplot(varImp(fit_rf))
-
 ```
 
-Figure \@ref{fig:rf-plot} displays the predicted DC power for each generation 
+Figure \@ref(fig:rf-plot) displays the predicted DC power for each generation 
 source on the test set.
 Other collections of variables applied did not improve the result.
 For example, despite the generation sources showing little importance, removing them
 from the random forest training data was detrimental to predictions on the test set.
-The result of the random forest fit to the test set is shown in table \@ref{tab:rf-tab}
+The result of the random forest fit to the test set is shown in table \@ref(tab:rf-tab)
 
-```{r rf-plot, fig.cap = "Random Forest Prediction by Generation Source", fig.height = 28}
+```{r rf-plot, fig.cap = "Random Forest Prediction on Test Set"}
 pred_rf <- predict(fit_rf, test_set_wide)
 
 result <- tibble(method = "Random Forest",
@@ -1667,24 +1675,28 @@ prediction <- test_set %>%
   add_column(pred = pred_rf)
 
 prediction %>%
+  group_by(date_time) %>%
+  mutate(pred = mean(pred)) %>%
   ggplot(aes(x = date_time)) +
   geom_line(aes(y = dc_power, color = generation_source), alpha = 0.75) +
   geom_line(aes(y = pred)) +
-  facet_grid(generation_source ~ .) +
   theme(legend.position = "none") +
-  labs(x = "Time",
+  labs(x = "Date and Time",
        y = "DC Power")
 ```
 
 ```{r rf-tab}
 result %>%
-  kbl() %>%
+  kbl(caption = "Random Forest RMSE") %>%
   kable_material()
 ```
 
 # Results {#results}
 
 ## Model Root Mean Squared Errors {#RMSES}
+
+The RMSEs of the prediction from each model are shown in table \@ref(tab:results-tab).
+
 ```{r results-tab}
 results %>%
   kbl(caption = "RMSE of Each Model on the Test Set") %>%
@@ -1693,6 +1705,16 @@ results %>%
 
 
 ## Final Validation {#final_validation}
+
+Finally, the training data and test data were recombined into the solar data.
+The solar data was used to train a prediction to be applied to the 
+validation data set, separated at the beginning of model development.
+The three models were the best fitting linear regression model, shown in figure
+\@ref(fig:validation-linear-graph), the ARIMA model based on the average DC 
+power generated by the various sources, shown in figure 
+\@ref(fig:arima-validation-graph), and the random forest model, shown in figure 
+\@ref(fig:rf-validation-graph).
+
 
 ```{r validation-linear}
 validation <- join_generation_weather(generation_validation, weather_validation)
@@ -1716,44 +1738,83 @@ validation_results <- tibble(method = "Linear Regression",
 
 ```
 
-```{r}
+```{r validation-linear-graph, fig.cap = "Linear Regression Predictions on Validation Set"}
 predicted_power %>%
   ggplot(aes(x = date_time)) +
-  geom_line(aes(y = dc_power, color = generation_source)) +
+  geom_line(aes(y = dc_power, color = generation_source), alpha = 0.75) +
   geom_line(aes(y = pred)) +
-  theme(legend.position = "none")
+  theme(legend.position = "none") +
+  labs(x = "Date and Time",
+       y = "DC Power")
 ```
 
 
 ```{r validation-arima}
-test_date_times <- validation %>%
-  pull(date_time) %>%
-  unique()
+ts_train_set <- solar %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  as_tsibble(key = generation_source, index = date_time)
+  
+arima_models <- ts_train_set %>%
+  group_by(generation_source) %>%
+  model(arima = ARIMA(dc_power ~ irradiation + module_temperature + module_temperature_sq))
 
-generation_sources <- validation %>%
-  pull(generation_source) %>%
-  unique()
+ts_test_set <- validation %>%
+  mutate(module_temperature_sq = module_temperature ^ 2) %>%
+  as_tsibble(key = generation_source, index = date_time) %>%
+  group_by(generation_source)
 
-arima_result <- solar %>%
-  group_by(date_time) %>%
-  summarize(avg_dc_power = mean(dc_power, na.rm = TRUE)) %>%
-  pull(avg_dc_power) %>%
-  ts(frequency = 96)  %>% # 4 * 24 for every 15 minutes over 24 hours
-  auto.arima(seasonal = TRUE)
-
-forecast_result <- arima_result %>%
-  forecast(h = length(test_date_times)) %>%
-  plot()
-
-predicted_power <- tibble(date_time = test_date_times, pred = forecast_result$mean)
-predicted_power <- expand_grid(date_time = test_date_times,
-                               generation_source = generation_sources) %>%
-  left_join(predicted_power, by = "date_time")
+predicted_power <- forecast(arima_models, new_data = ts_test_set) %>%
+  as_tibble() %>%
+  select(generation_source, date_time, pred = .mean) %>%
+  mutate(pred = ifelse(pred < 0, 0, pred)) %>%
+  left_join(ts_test_set, by = c("date_time", "generation_source"))
 
 validation_results <- validation_results %>%
-  add_row(method = "ARIMA",
-          RMSE = RMSE(predicted_power$pred, validation$dc_power))
+  add_row(method = "ARIMA Forecast", 
+         RMSE = RMSE(predicted_power$pred, predicted_power$dc_power))
+
+###############################
+#
+#test_date_times <- validation %>%
+#   pull(date_time) %>%
+#   unique()
+# 
+# generation_sources <- validation %>%
+#   pull(generation_source) %>%
+#   unique()
+# 
+# arima_result <- solar %>%
+#   group_by(date_time) %>%
+#   summarize(avg_dc_power = mean(dc_power, na.rm = TRUE)) %>%
+#   pull(avg_dc_power) %>%
+#   ts(frequency = 96)  %>% # 4 * 24 for every 15 minutes over 24 hours
+#   auto.arima(seasonal = TRUE)
+# 
+# forecast_result <- arima_result %>%
+#   forecast(h = length(test_date_times)) %>%
+#   plot()
+# 
+# predicted_power <- tibble(date_time = test_date_times, pred = forecast_result$mean)
+# predicted_power <- expand_grid(date_time = test_date_times,
+#                                generation_source = generation_sources) %>%
+#   left_join(predicted_power, by = "date_time")
+# 
+# validation_results <- validation_results %>%
+#   add_row(method = "ARIMA",
+#           RMSE = RMSE(predicted_power$pred, validation$dc_power))
 ```
+```{r arima-validation-graph, fig.cap = "ARIMA Forecast on Validation Days"}
+predicted_power %>%
+  group_by(date_time) %>%
+  mutate(pred = mean(pred)) %>%
+  ggplot(aes(x = date_time)) +
+  geom_line(aes(y = dc_power, color = generation_source), alpha = 0.75) +
+  geom_line(aes(y = pred)) +
+  theme(legend.position = "none") +
+  labs(x = "Date and Time",
+       y = "DC Power")
+```
+
 
 
 ```{r validation-rf}
@@ -1794,23 +1855,31 @@ validation_results <- validation_results %>%
           RMSE = RMSE(pred_rf, validation$dc_power))
 ```
 
-```{r}
+```{r rf-validation-graph, fig.cap = "Random Forest Predictions on Validation Set"}
 validation %>%
+  add_column(pred_rf = pred_rf) %>%
+  group_by(date_time) %>%
+  mutate(pred_rf = mean(pred_rf)) %>%
   ggplot(aes(x = date_time)) +
   geom_line(aes(y = dc_power, color = generation_source)) +
   geom_line(aes(y = pred_rf)) +
-  theme(legend.position = "none")
+  theme(legend.position = "none") +
+  labs(x = "Date and Time",
+       y = "DC Power")
 ```
 
+The RMSEs of the various predictions are shown in table \@ref(tab:validation-results).
+
 ```{r validation-results}
-validation-results %>%
-  kbl(caption = "Validation RMSE") %>%
+validation_results %>%
+  kbl(caption = "Validation RMSEs") %>%
   kable_material()
 ```
 
 # Conclusion {#conclusion}
 
 ## Summary
+
 Exploratory analysis was conducted to see the patterns of the power generation 
 data and the weather data.
 Sanity checks on the data revealed that the data produced by one of the plants
@@ -1831,7 +1900,17 @@ Finally, random forest was employed to achieve the best prediction.
 The random forest variable importance results reinforced the findings of the
 refined linear regression model.
 
+Finally, the predictions were trained on all of the non-validation data and used
+to predict the validation data.
+The resulting RMSEs were higher for the validation set.
+The higher RMSEs suggest some amount of over training.
+However, it may be observed in the graphs of the fit that the validation data
+had missing values and sharp drops in DC power.
+Sudden plunges to 0 DC power suggest a sensor fault of some kind, which would
+negatively impact RMSE as they were not accounted for in the model.
+
 ## Potential Impact
+
 The refined linear regression model and the random forest predictions both
 produced reasonable improvements over the most basic linear regression model
 built solely on irradiation.
@@ -1841,12 +1920,55 @@ model to great effect.
 
 ## Limitations
 
+Unfortunately, the noisiness of missing or anomalous observations at plant 
+4136001 made predictions very difficult.
+Without cleaner data with which to work, making accurate predictions for the 
+DC power output of plant 4136001 was outside the scope of this analysis.
+
+The weather sensor data was fairly limited.
+As was noted in the importance of variables determined by the random forest,
+the hour of an observation has some observable impact on the DC power.
+Time is expected to be a confounding variable of weather, not a driving 
+variable in itself.
+Thus, the hour being a non-negligible variable suggests that there were aspects
+of the weather or surrounding environment that were both influenced by the time
+of day and also impacted DC power.
+
+The data included in this data set covered only 34 days.
+Multiple months or even many years of data could possibly reveal greater
+periodicity in the data.
+Additionally, since plant 4136001 appears to have been in operation longer,
+it may reveal when plant-wide outages appear.
 
 ## Future Work
-Linear Model by generation source
-Incorporating more predictable weather data
-Predicting based on purely predictable weather data (no module temp, only ambient temp and irradiation)
-Predicting when a solar panel is failing
-Ensemble modelling
 
+While data collected at plant 4136001 did not serve well to make predictions on 
+the DC power, the data could serve well to develop a system to predict sensor 
+faults before they occur.
+It could be possible that irradiation levels, temperature, or a host of other 
+observable variables correlate to a missing observation or anomalous data.
 
+Treating the data as a time series and accounting for lag revealed lagged 
+correlation between irradiation, module temperature, and ambient temperature.
+Irradiation and ambient temperature may be predicted in advance, to some extent,
+from a meteorological organization.
+Module temperature, however, is specific to the plant.
+Thus, developing a model to predict module temperature from other future-predictable
+variables allow more actionable results.
+
+More work could be done to incorporate predictable weather data.
+That is, data could be queried from other data bases to find information about
+wind speed, cloud cover, precipitation, etc.
+A more sophisticated model could then be constructed that requires only the 
+predicted weather that day to make a reasonable estimation of the DC power the
+plant would produce.
+This is the best case scenario for the plant, as they could use publicly
+available weather data to predict the impact on the electrical grid each day.
+
+In this analysis, three models were built: Linear Regression, ARIMA, and Random
+Forest. 
+Other methods were explored, for example Principle Component Analysis,
+but were found to be less effective than even predicting the average.
+A powerful approach for future work would be to assemble an ensemble 
+model combining models that consider a-temporal variables, like the Random Forest,
+and a model that acknowledges the time series qualities of the data, like ARIMA.
