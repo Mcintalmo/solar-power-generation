@@ -142,7 +142,7 @@ rm(extract_validation) # 768
 
 #### METRIC OF IMPROVEMENT ####
 RMSE <- function(predicted_power, test_power){
-  sqrt(mean((test_power - predicted_power)^2))
+  sqrt(mean((test_power - predicted_power) ^ 2, na.rm = TRUE))
 }
 
 ################################################################################
@@ -884,39 +884,48 @@ train_set_wide <- train_set %>%
   mutate(day = as.numeric(round_date(date_time, unit = "day") - make_datetime(2020, 05, 15)),
          hour = as.numeric(hour(date_time)),
          minute = as.numeric(minute(date_time)),
-         generation_source = as.factor(generation_source)) %>%
-  select(-generation_source, -ac_power, -date_time, -plant_id, -weather_source, -daily_yield, -total_yield) %>%
+         intercept = 1) %>%
+  pivot_wider(names_from = "generation_source", values_from = intercept, values_fill = 0) %>%
+  select(-ac_power, -date_time, -plant_id, -weather_source, -daily_yield, -total_yield) %>%
   relocate(dc_power) %>%
   na.omit()
-result <- prcomp(train_set_wide, scale = TRUE)
-result$rotation <- -1 * result$rotation
-result$rotation
-
-var_explained <- result$sdev ^ 2 / sum(result$sdev ^ 2) # suggests there is 1 big component, 4 smaller ones of about equal impact
-qplot(c(1:7), var_explained) + 
-  geom_line()
-
-
-set.seed(1)
-fit <- pcr(dc_power ~ ., data = train_set_wide, scale = TRUE, validation = "CV")
-summary(fit)
+# TODO: Binarize generation source data
 
 test_set_wide <- test_set %>%
   mutate(day = as.numeric(round_date(date_time, unit = "day") - make_datetime(2020, 05, 15)),
          hour = as.numeric(hour(date_time)),
          minute = as.numeric(minute(date_time)),
-         generation_source = factor(generation_source)) %>%
-  select(-generation_source, -ac_power, -date_time, -plant_id, -weather_source, -daily_yield, -total_yield) %>%
+         intercept = 1) %>%
+  pivot_wider(names_from = "generation_source", values_from = intercept, values_fill = 0) %>%
+  select(-ac_power, -date_time, -plant_id, -weather_source, -daily_yield, -total_yield) %>%
   relocate(dc_power) %>%
   na.omit()
 
-RMSEs <- sapply(c(1:6), function(n_comp){
+pca <- prcomp(train_set_wide, scale = FALSE)
+pca$rotation <- -1 * pca$rotation
+pca$rotation
+
+var_explained <- result$sdev ^ 2 / sum(result$sdev ^ 2) # suggests there is 1 big component, 4 smaller ones of about equal impact
+qplot(c(1:29), var_explained, xlab = "Principle Component")
+
+summary(pca)
+
+
+set.seed(1)
+fit <- pcr(dc_power ~ ., data = train_set_wide, scale = TRUE, validation = "CV")
+summary(fit)
+plot(fit)
+
+RMSEs <- sapply(c(1:28), function(n_comp){
   predicted_power<- predict(fit, test_set_wide, ncomp = n_comp)
   RMSE(predicted_power, test_set$dc_power)
 })
-qplot(c(1:6), RMSEs) +
+
+qplot(c(1:28), RMSEs) +
   geom_line()
-RMSEs # 143.60274 112.22240 112.30540 159.26567  55.68699  47.24632
+
+RMSEs
+
 
 ########### SENSOR FAULTS
 fit <- train_set %>%
