@@ -1,0 +1,12 @@
+Welcome to the Solar Power Generation project!
+
+If you are reading this, then the most important files for you to consider are 
+exploration.R - A slight misnomer, this file contains the R script for both initial data exploration and also machine learning model construction 
+solar_plant_power_generation_report.RMD - The markdown file used to generate the pdf. This includes the most up to date and exaustive code
+solar_plant_power_generation_report.pdf - A pretty output from the RMD. Long, but filled mostly with graphics
+
+I will admit immediately, I did a bad thing.
+Much of the results code is only in the RMD file and absent from the R script.
+The PDF is prettiest, but it doesn't include code since it got pretty long with the visuals.
+
+-Alex
