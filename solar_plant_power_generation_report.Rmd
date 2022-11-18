@@ -99,7 +99,7 @@ The data for this analysis was collected by two solar plants in India.
 The first plant, id: 4135001, is near Gandikotta, Andhra and the second plant,
 id: 4136001, is near Nasik, Maharashtra.
 The data were collected at 15 minute intervals for 34 days.
-22 inverter sensors and one weather sensor at each plant brought the total to 46
+Twenty-two inverter sensors and one weather sensor at each plant brought the total to 46
 sensors collecting data. 
 
 
@@ -198,25 +198,12 @@ generation %>%
   kable_material()
 ```
 
-```{r power-generation-source-keys}
-generation %>%
-  select(plant_id, source_key) %>%
-  group_by(source_key) %>%
-  slice(1) %>%
-  pivot_wider(names_from = "plant_id",
-              names_prefix = "Plant ID: ",
-              values_from = "source_key") %>%
-  unnest() %>%
-  kbl(caption = "Power Generation Source Keys") %>%
-  kable_material()
-```
-
-The generation data consist of 136476 observations of 7 variables: The time stamp,
+The generation data consist of 136,476 observations of 7 variables: The time stamp,
 the plant id number, the inverter key, the measured DC power from the panels, 
 the measured AC after inversion, the daily yield of power, and the total yield
 that the sensor has ever recorded.
 Each plant has 22 units measuring the inverter variables, shown in 
-table \@ref(tab:power-generation-source-keys)
+Table \@ref(tab:power-generation-source-keys)
 
 ```{r, eval = FALSE}
 weather %>% 
@@ -235,26 +222,14 @@ weather %>%
   kable_material()
 ```
 
-```{r weather-source-keys}
-weather %>%
-  select(plant_id, source_key) %>%
-  group_by(source_key) %>%
-  slice(1) %>%
-  pivot_wider(names_from = "plant_id",
-              names_prefix = "Plant ID: ",
-              values_from = "source_key") %>%
-  unnest() %>%
-  kbl(caption = "Weather Data Source Keys") %>%
-  kable_material()
-```
 
-The weather data consist of only 6441 observations of 6 variables: The time stamp
+The weather data consist of only 6,441 observations of 6 variables: The time stamp
 of the observations at 15 minute intervals, the plant id at which the observation
 was taken, the weather sensor key (identical across the plant), the ambient
 temperature in Celsius, the module temperature in Celsius, and the irradiation.
 The difference in the number of observations owes to the number of sensors.
 Each plant has only 1 sensor recording weather data, shown in 
-table \@ref(tab:weather-source-keys).
+Table \@ref(tab:weather-source-keys).
 
 ```{r}
 rm(parse_generation_data, parse_weather_data)
@@ -274,7 +249,7 @@ generation %>%
        fill = "Plant ID")
 ```
 
-Going by figure \@ref(fig:generation-dc-power), it may be seen that the distribution of DC Power observations
+Going by Figure \@ref(fig:generation-dc-power), it may be seen that the distribution of DC Power observations
 is considerably more spread out for plant 4135001 than 4136001.
 
 ```{r dc-generation-summary}
@@ -289,7 +264,7 @@ generation %>%
   kable_material()
 ```
 
-In table \@ref(tab:dc-generation-summary), it is shown that the max and mean values 
+In Table \@ref(tab:dc-generation-summary), it is shown that the max and mean values 
 differ by a factor of 10.
 Over half of the recorded observations at plant 4136001 are 0. 
 A median of 0 is not unreasonable, if we expect the sun to be down for more than
@@ -299,7 +274,7 @@ However, these data were collected in May in India, which resides in the
 Northern hemisphere. 
 It would be expected that the sun is out for more than half of the observations.
 To better understand what might be happening, let us compare the DC output of
-the solar panels to the AC output after conversion in figure \@ref(fig:dc-ac-plot).
+the solar panels to the AC output after conversion in Figure \@ref(fig:dc-ac-plot).
 
 ```{r dc-ac-plot, fig.cap = "DC to AC Power Conversion"}
 generation %>%
@@ -313,7 +288,7 @@ generation %>%
 ```
 
 Plant 4136001 is reporting that the conversion rate from DC power to AC power is
-about %100. 
+about 100%. 
 However, 4135001 is reporting a 90% loss of power during conversion, despite
 collecting 10 times as much power.
 Even the worst DC to AC adapters are about 80% effective. 
@@ -384,7 +359,7 @@ solar %>%
 
 Figure \@ref(fig:inverter-missing) shows the number of missing values from power sensors over time.
 Notably, missing values at plant 4135001 seem to go across all 22 sensors.
-Additionally, For much of the last week of may, plant 4136001 had about 4
+Additionally, for much of the last week of May, plant 4136001 had about 4
 power generation sensors that were offline.
 
 ```{r weather-missing, fig.cap = "Time Series of Weather Sensor Failures"}
@@ -480,7 +455,7 @@ solar %>%
        fill = "Plant ID")
 ```
 
-Figure \@{fig:combined-missing} shows an interesting phenomena.
+Figure \@ref(fig:combined-missing) shows an interesting phenomena.
 Plant 4136001 has the worst offending sensors by a large margin.
 Nearly 4 times as many observations were missed by 4 outstanding sensors.
 The rest of the sensors at plant 4136001 have missed relatively few observations,
@@ -504,7 +479,7 @@ solar %>%
 
 Figure \@ref(fig:cluster-missing-anomaly) shows the sensor grouping as a result of relating missing counts
 to anomaly counts.
-The plant since 4136001 cluster shows a healthiest collection of data, while
+The plant since 4136001 cluster shows the healthiest collection of data, while
 plant 4135001 clusters suggest that less missing data from a set does not
 necessarily mean that the data is more trustworthy.
 
@@ -534,7 +509,7 @@ every source.
 The total yield of each power generation source increases at about the same rate,
 and missing values appear to propagate across the sensors of the plant.
 
-```{r total-yield-4136001, fig.cap = "Plant 4136001 Total Yield Over Time"}
+```{r total-yield-4136001, fig.cap = "Plant 4136001 Total Yield Over Time by Sensor"}
 solar %>%
   filter(plant_id == "4136001") %>%
   ggplot(aes(x = date_time, y = total_yield, color = generation_source)) +
@@ -566,7 +541,7 @@ There were 34 days in the entire data set.
 So, the last three days were partitioned to be a validation set, against
 which predictions would only be made after the models were finalized.
 Later, to build the models themselves, the training data was separated further 
-into a train set and test set, using days 30 - 31 for comparison.
+into a training set and test set, using days 30 - 31 for comparison.
 
 ```{r}
 date_time_cutoff = make_date(2020, 06, 14)
@@ -612,7 +587,7 @@ generation_train %>%
   kable_material()
 ```
 
-While table \@ref(tab:power-generation-summary) gives an understanding of what
+While Table \@ref(tab:power-generation-summary) gives an understanding of what
 the entirety of plant 4135001 power generation looks like, it is important
 to look at each sensor individually.
 
@@ -671,7 +646,7 @@ generation_train %>%
 ```
 
 Figure \@ref(fig:total-yield-by-source) appears to be showing values all over the place.
-However, what figure \@ref(fig:total-yield-by-source) really reveals is which of
+However, what Figure \@ref(fig:total-yield-by-source) really reveals is which of
 the power generation sensors have been running the longest, and as such have
 generated a larger total yield.
 
@@ -914,7 +889,7 @@ weather_train %>%
   guides(color = guide_legend(title = "Average"))
 ```
 
-Note that in figure \@ref(fig:averaged-weather-data), the scale of the irradiation has been multiplied 
+Note that in Figure \@ref(fig:averaged-weather-data), the scale of the irradiation has been multiplied 
 by 40 and shifted up 20 degrees to better visualize the relationship with
 module temperature and its lag.
 Irradiation leads module temperature by about 15 minutes and ambient temperature
@@ -965,10 +940,10 @@ solar %>%
        y = "AC Power")
 ```
 
-The fit shown in table \@rec(tab:ac-dc-line-fit) suggests a 97.7% conversion rate 
+The fit shown in Table \@rec(tab:ac-dc-line-fit) suggests a 97.7% conversion rate 
 from DC to AC power, only 2.3% is lost. 
 Such a small loss suggests that the plants are using high quality transformers.
-We can see in figure  \@ref(fig:ac-dc-fit-graph) that the fit is good. 
+We can see in Figure  \@ref(fig:ac-dc-fit-graph) that the fit is good. 
 
 ### Lag
 
@@ -1009,7 +984,7 @@ weather_tsbl %>%
 ```
 
 A strong correlation is found between the irradiation and the module temperature
-after a 15 minute lag, as shown in figure \@ref(fig:cc-irr-mod) and table 
+after a 15 minute lag, as shown in Figure \@ref(fig:cc-irr-mod) and Table 
 \@ref(tab:cc-irr-mod-max).
 This can be explained by the radiation heat transfer as a result of the 
 electromagnetic radiation of the sun.
@@ -1067,7 +1042,7 @@ weather_tsbl %>%
 ```
 
 Interestingly, the ambient temperature lags the module temperature, and by 45
-minutes, as shown in table \@ref(tab:cc-amb-mod-max).
+minutes, as shown in Table \@ref(tab:cc-amb-mod-max).
 At first glance, this does not make much sense.
 It is unlikely that a module could be driving the ambient temperature.
 
@@ -1130,7 +1105,7 @@ Time to explore ways to reducing reduce it.
 ### Generation Source Effect {#generation_source_effect}
 
 To start, the effect of stratifying by generation source is examined. The results
-are shown in table \@ref(tab:average-by-source-model).
+are shown in Table \@ref(tab:average-by-source-model).
 
 ```{r}
 average_source <- train_set %>%
@@ -1164,7 +1139,7 @@ In exploration, it was observed that irradiation and DC power output were highly
 correlated. 
 A linear regression method was used to predict DC power output based purely on 
 irradiation, using the train set to predict against the test set.
-The result is shown in table \@ref(tab:irradiation-effect).
+The result is shown in Table \@ref(tab:irradiation-effect).
 
 ```{r}
 fit <- lm(dc_power ~ irradiation, data = train_set)
@@ -1210,7 +1185,7 @@ as a predictor?
 It is not unreasonable to consider other weather effects to construct the model.
 We can get a better understanding of how temperature effects the DC power output by
 sweeping away the irradiation effect and plotting the resulting residual against
-the module temperature. The results are shown in figure \@ref(fig:mod-temp-eff).
+the module temperature. The results are shown in Figure \@ref(fig:mod-temp-eff).
 
 ```{r mod-temp-eff, fig.cap = "Module Temperature Effect"}
 train_set %>%
@@ -1230,7 +1205,7 @@ Perhaps the module temperature effect is best represented by parabola.
 To account for the parabolic shape of the data, a placeholder variable was added to the train
 and test sets that was simply the squared module temperature.
 Then, a fit was made based on irradiation, module temperature, and the module
-temperature squared. The results may be seen in table \@ref(tab:irr-mod-temp-tab).
+temperature squared. The results may be seen in Table \@ref(tab:irr-mod-temp-tab).
 
 ```{r}
 fit <- train_set %>%
@@ -1304,7 +1279,7 @@ result %>%
 Now, the residual DC power is compared to the ambient temperature, similar to how
 module temperature was examined.
 The result of sweeping out the irradiation and module temperature squared effect
-are shown in figure \@ref(fig:amb-temp-eff).
+are shown in Figure \@ref(fig:amb-temp-eff).
 
 ```{r amb-temp-eff, fig.cap = "Ambient Temperature Effect"}
 train_set %>%
@@ -1352,13 +1327,13 @@ result %>%
 ```
 
 Table \@ref(tab:amb-temp-eff-tab) reinforces what was assumed from 
-figure \@ref(fig:amb-temp-eff).
+Figure \@ref(fig:amb-temp-eff).
 Adding ambient temperature to the models results in an improvement of less than half of a percent.
 
 ### Clamping and Sensor Faults {#clamping_and_sensor_faults}
 
 Let's take a glance look at how our predictions compare to the test data.
-A summary is shown in \@ref(tab:predict-summary).
+A summary is shown in Table \@ref(tab:predict-summary).
 
 ```{r predict-summary}
 summary(predicted_power) %>%
@@ -1374,7 +1349,7 @@ It is not physically possible for negative DC power to be produced.
 Negative DC Power would suggest that the solar panels are drawing energy in.
 To account for this impossibility, a clamped prediction increases any results DC Power that is
 less than 0 to 0.
-The results of clamping may be seen in table \@ref(tab:clamp)
+The results of clamping may be seen in Table \@ref(tab:clamp)
 
 ```{r}
 predicted_power <- test_set %>%
@@ -1434,7 +1409,7 @@ result %>%
   kable_material()
 ```
 
-Table \@ref(tab: clamped-no-anomaly) shows the result of removing anomalies from
+Table \@ref(tab:clamped-no-anomaly) shows the result of removing anomalies from
 the training data and clamping the prediction.
 
 39.15 is a considerable improvement of 90.3% over the naive RMSE.
@@ -1492,10 +1467,9 @@ arima_result <- train_set %>%
 arima_result
 ```
 
-
 ```{r arima-forecast, fig.cap = "ARIMA Forcecast on Test Set"}
 forecast_result <- arima_result %>%
-  forecast(h = length(test_date_times)) %>%
+  forecast::forecast(h = length(test_date_times)) %>%
   plot()
 ```
 
@@ -1529,7 +1503,7 @@ The fact that it improves so much over the average is impressive.
 
 It is possible through the use of tsibbles and the fable package to be more 
 granular with ARIMA.
-In particular, it may be separated to apply only to each group.
+In particular, ARIMA may be separated to apply only to each group.
 The previous ARIMA model used only the average dc.
 Table \@ref(tab:arima-by-source) shows the result of applying an ARIMA fit to each
 group.
@@ -1575,7 +1549,7 @@ This is an improvement on the uni-variate linear regression, but does not hold
 up to the multivariate models.
 Note that for this result, clamping predictions to be greater than 0 was applied.
 Clamping only reduced the RMSE by 0.3.
-The individualized-by-source fits are shown in figure \@ref(fig:arima-pred).
+The individualized-by-source fits are shown in Figure \@ref(fig:arima-pred).
 
 While there exist methods to include external regressors to an ARIMA fit, those
 models will be left for future work.
@@ -1651,7 +1625,7 @@ fit_rf <- train(dc_power ~ .,
 
 Now, let us take a look at what the importance of various variables in building
 the model.
-The importance of each model, extracted with varImp, is shown in figure
+The importance of each variable, extracted with varImp from the caret package, is shown in Figure
 \@ref(fig:var-imp).
 Figure \@ref(fig:var-imp) clearly shows that irradiation, irradiation squared,
 module temperature, and module temperature squared dominate the predictions.
@@ -1673,7 +1647,7 @@ source on the test set.
 Other collections of variables applied did not improve the result.
 For example, despite the generation sources showing little importance, removing them
 from the random forest training data was detrimental to predictions on the test set.
-The result of the random forest fit to the test set is shown in table \@ref(tab:rf-tab)
+The result of the random forest fit to the test set is shown in Table \@ref(tab:rf-tab)
 
 ```{r rf-plot, fig.cap = "Random Forest Prediction on Test Set"}
 pred_rf <- predict(fit_rf, test_set_wide)
@@ -1707,7 +1681,7 @@ result %>%
 
 ## Model Root Mean Squared Errors {#RMSES}
 
-The RMSEs of the prediction from each model are shown in table \@ref(tab:results-tab).
+The RMSEs of the prediction from each model are shown in Table \@ref(tab:results-tab).
 
 ```{r results-tab}
 results %>%
@@ -1721,10 +1695,10 @@ results %>%
 Finally, the training data and test data were recombined into the solar data.
 The solar data was used to train a prediction to be applied to the 
 validation data set, separated at the beginning of model development.
-The three models were the best fitting linear regression model, shown in figure
+The three models were the best fitting linear regression model, shown in Figure
 \@ref(fig:validation-linear-graph), the ARIMA model based on the average DC 
-power generated by the various sources, shown in figure 
-\@ref(fig:arima-validation-graph), and the random forest model, shown in figure 
+power generated by the various sources, shown in Figure 
+\@ref(fig:arima-validation-graph), and the random forest model, shown in Figure 
 \@ref(fig:rf-validation-graph).
 
 
@@ -1880,7 +1854,7 @@ validation %>%
        y = "DC Power")
 ```
 
-The RMSEs of the various predictions are shown in table \@ref(tab:validation-results).
+The RMSEs of the various predictions are shown in Table \@ref(tab:validation-results).
 
 ```{r validation-results}
 validation_results %>%
@@ -1984,3 +1958,34 @@ but were found to be less effective than even predicting the average.
 A powerful approach for future work would be to assemble an ensemble 
 model combining models that consider a-temporal variables, like the Random Forest,
 and a model that acknowledges the time series qualities of the data, like ARIMA.
+
+\newpage
+
+# Appendix
+
+```{r power-generation-source-keys}
+generation %>%
+  select(plant_id, source_key) %>%
+  group_by(source_key) %>%
+  slice(1) %>%
+  pivot_wider(names_from = "plant_id",
+              names_prefix = "Plant ID: ",
+              values_from = "source_key") %>%
+  unnest() %>%
+  kbl(caption = "Power Generation Source Keys") %>%
+  kable_material()
+```
+
+
+```{r weather-source-keys}
+weather %>%
+  select(plant_id, source_key) %>%
+  group_by(source_key) %>%
+  slice(1) %>%
+  pivot_wider(names_from = "plant_id",
+              names_prefix = "Plant ID: ",
+              values_from = "source_key") %>%
+  unnest() %>%
+  kbl(caption = "Weather Data Source Keys") %>%
+  kable_material()
+```
